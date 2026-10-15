@@ -1053,10 +1053,11 @@ function vHome() {
         const bt = S.bank && S.bank.types.find(x => x.type === t);
         const total = bt ? bt.items.length
           : (t === 'listen' && S.listen ? S.listen.items.length : 0);
+        // 累计就是"做了多少"，**不带分母** —— 上限是"这套卷子的进度"那块的事。
         const dn = doneCountOf(t);
         return `<div class="v">
           <span>${NAV_TYPE_ICON[t] || '📘'} ${esc(q.name || t)}</span>
-          <b${dn ? '' : ' style="color:var(--fg3)"'}>${dn} / ${total} ${esc(q.unit || '篇')}</b>
+          <b${dn ? '' : ' style="color:var(--fg3)"'}>${dn} ${esc(q.unit || '篇')}</b>
         </div>`;
       }).join('')}
     </div>
