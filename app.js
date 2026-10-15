@@ -1,28 +1,136 @@
 /* 四级训练台 — 纯前端，无后端，进度存本地 */
 'use strict';
 
-/* 考试信息。
-   默认取题库自带的那条（大学英语四级 / 2026-12-12），
-   使用者在「我的 → 我的考试」里可以改成**任何考试和任何日期** ——
-   四级、六级、雅思、托福、高考、考研都行，站本身不限定考试类型。
-   日期不写死：四级一年两场（6 月 / 12 月），每年日期由官方另行公布。 */
-const EXAM_STRUCT = '写作 15% · 听力 35% · 阅读 35% · 翻译 15%';
+/* ==================== 考试 与 题型 ====================
+   QTYPES 是题型登记表：impl 为 true 才是"能出题、能判分"的题型。
+   EXAMS  是考试清单：每个考试声明它要考哪些题型。
 
-function examInfo() {
-  const e = LS.get('exam', null);
-  const d = (S.bank && S.bank.exam) || {};
-  if (e && e.date) {
-    // 只改日期时，考试名称仍沿用题库自带的（四级）
-    return { name: e.name || d.name || '大学英语四级', date: e.date,
-             note: e.note || d.note || '', custom: true };
-  }
-  return { name: d.name || '大学英语四级', date: d.date || '',
-           note: d.note || '', site: true };
+   ⚠️ 两条硬规矩：
+   1. 加新考试 = 往 EXAMS 加一条，并且它的 types **必须都已实现**。
+      只加考试名不实现题型，会让使用者选了考试却刷不了题 —— 那是骗人。
+   2. 题型没做完之前，不要在任何文案里承诺"支持这个考试"。
+   ==================================================== */
+
+const QTYPES = {
+  careful:  { name: '仔细阅读', impl: true,  unit: '篇' },
+  matching: { name: '长篇匹配', impl: true,  unit: '篇' },
+  cloze:    { name: '选词填空', impl: true,  unit: '篇' },
+  listen:   { name: '听力听写', impl: true,  unit: '句' },
+  // —— 以下还没实现，先登记着，方便按顺序补 ——
+  single:   { name: '单项选择', impl: false, unit: '题' },
+  judge:    { name: '判断题',   impl: false, unit: '题' },
+  gap:      { name: '填空题',   impl: false, unit: '题' },
+  audio:    { name: '音频听力', impl: false, unit: '题' },
+  write:    { name: '写作',     impl: false, unit: '篇' },
+  speak:    { name: '口语',     impl: false, unit: '题' },
+};
+
+/* 考试清单。group 决定在界面上怎么分组；数组顺序就是推进顺序。
+   builtin:true = 站里已经内置了这个考试的题库。 */
+const EXAMS = [
+  /* ——— 第一阶段：四级已经做好（有内置题库） ——— */
+  { id: 'cet4', group: '大学', name: '大学英语四级（CET-4）', short: '大学英语四级',
+    date: '2026-12-12', builtin: true,
+    types: ['careful', 'matching', 'cloze', 'listen'],
+    struct: '写作 15% · 听力 35% · 阅读 35% · 翻译 15%',
+    note: '上午 9:00-11:20，总分 710，425 分为六级报考门槛' },
+
+  /* ——— 第二阶段：题型和四级相同，接上就能用，只缺题库 ——— */
+  { id: 'cet6', group: '大学', name: '大学英语六级（CET-6）', short: '大学英语六级',
+    date: '', builtin: false, types: ['careful', 'matching', 'cloze', 'listen'],
+    note: '题型与四级相同、难度更高；四级 425 分以上才能报考' },
+  { id: 'tem4', group: '大学', name: '英语专业四级（TEM-4）', short: '英语专业四级',
+    date: '', builtin: false, types: ['careful', 'matching', 'cloze', 'listen'],
+    note: '英语专业大二考，难度接近六级' },
+  { id: 'kaoyan', group: '大学', name: '考研英语（一 / 二）', short: '考研英语',
+    date: '', builtin: false, types: ['careful', 'matching', 'cloze'],
+    note: '12 月下旬考，具体日期每年不同' },
+
+  /* ——— 第三阶段：需要补新题型 ——— */
+  { id: 'ielts', group: '出国', name: '雅思 IELTS', short: '雅思',
+    date: '', builtin: false,
+    types: ['single', 'judge', 'gap', 'matching', 'write', 'speak'],
+    note: '听说读写四项，机考 / 纸笔可选；考试日期自己报名决定' },
+  { id: 'toefl', group: '出国', name: '托福 TOEFL iBT', short: '托福',
+    date: '', builtin: false, types: ['single', 'audio', 'gap', 'write', 'speak'],
+    note: '全机考，阅读听力以选择题为主' },
+  { id: 'duolingo', group: '出国', name: '多邻国英语测试（DET）', short: '多邻国',
+    date: '', builtin: false, types: ['single', 'gap', 'write', 'speak'],
+    note: '线上考、便宜、出分快' },
+  { id: 'pte', group: '出国', name: 'PTE Academic', short: 'PTE',
+    date: '', builtin: false, types: ['single', 'gap', 'write', 'speak'],
+    note: '全机考，出分快，澳洲认可度高' },
+  { id: 'gre', group: '出国', name: 'GRE', short: 'GRE',
+    date: '', builtin: false, types: ['single', 'gap', 'write'],
+    note: '美国研究生入学考试' },
+  { id: 'sat', group: '出国', name: 'SAT', short: 'SAT',
+    date: '', builtin: false, types: ['single', 'write'],
+    note: '美国本科入学考试' },
+
+  /* ——— 中学 ——— */
+  { id: 'gaokao', group: '中学', name: '高考英语', short: '高考英语',
+    date: '', builtin: false, types: ['single', 'gap', 'cloze', 'write'],
+    note: '多数省份 6 月 8 日下午考英语' },
+  { id: 'zhongkao', group: '中学', name: '中考英语', short: '中考英语',
+    date: '', builtin: false, types: ['single', 'gap', 'cloze', 'write'],
+    note: '各地时间不同，以本省安排为准' },
+  { id: 'fce', group: '中学', name: '剑桥通用五级 · FCE', short: '剑桥 FCE',
+    date: '', builtin: false, types: ['single', 'gap', 'matching', 'write'],
+    note: '第三级，约相当于雅思 5.5–6.5' },
+
+  /* ——— 小学 / 初中 ——— */
+  { id: 'pet', group: '小学·初中', name: '剑桥通用五级 · PET', short: '剑桥 PET',
+    date: '', builtin: false, types: ['single', 'gap', 'matching', 'write'],
+    note: '第二级，约相当于中考到高考之间' },
+  { id: 'ket', group: '小学·初中', name: '剑桥通用五级 · KET', short: '剑桥 KET',
+    date: '', builtin: false, types: ['single', 'gap', 'matching'],
+    note: '第一级，小学高年级到初中' },
+  { id: 'yle', group: '小学·初中', name: '剑桥少儿英语（YLE）', short: '剑桥少儿',
+    date: '', builtin: false, types: ['single', 'gap'],
+    note: 'Starters / Movers / Flyers 三级，幼儿园大班到小学' },
+
+  /* ——— 职业 ——— */
+  { id: 'bec', group: '职业', name: '商务英语 BEC', short: 'BEC',
+    date: '', builtin: false, types: ['single', 'gap', 'matching', 'write'],
+    note: '初级 / 中级 / 高级' },
+  { id: 'toeic', group: '职业', name: '托业 TOEIC', short: '托业',
+    date: '', builtin: false, types: ['single', 'audio'],
+    note: '职场英语，只考听力和阅读' },
+];
+
+const EXAMS_BY_ID = {};
+EXAMS.forEach(e => { EXAMS_BY_ID[e.id] = e; });
+const DEFAULT_EXAM_ID = 'cet4';
+
+function curExam() {
+  const sel = LS.get('exam', null);
+  if (sel && sel.id && EXAMS_BY_ID[sel.id]) return EXAMS_BY_ID[sel.id];
+  return EXAMS_BY_ID[DEFAULT_EXAM_ID];
 }
 
-function examShort() {
-  const n = examInfo().name || '考试';
-  return n.replace(/[（(].*$/, '').trim() || '考试';
+/* 当前考试信息。日期：使用者填过就用他填的，否则用考试自带的（可能为空）。 */
+function examInfo() {
+  const ex = curExam();
+  const sel = LS.get('exam', null) || {};
+  const custom = !!(sel.id === ex.id && sel.date);
+  return {
+    id: ex.id, name: ex.name, short: ex.short || ex.name,
+    date: custom ? sel.date : (ex.date || ''),
+    note: ex.note || '', struct: ex.struct || '',
+    types: ex.types || [], builtin: !!ex.builtin, custom,
+  };
+}
+
+function examShort() { return examInfo().short || '考试'; }
+
+/* 这个考试里"已经能用"和"还没做"的题型 */
+function implTypes(id) {
+  const ex = EXAMS_BY_ID[id || examInfo().id] || {};
+  return (ex.types || []).filter(t => (QTYPES[t] || {}).impl);
+}
+function missingTypes(id) {
+  const ex = EXAMS_BY_ID[id || examInfo().id] || {};
+  return (ex.types || []).filter(t => !(QTYPES[t] || {}).impl);
 }
 
 function examDateObj() {
@@ -43,26 +151,50 @@ function daysToExam() {
   return Math.max(0, Math.ceil((o - Date.now()) / 86400000));
 }
 
-/* 「我的 → 我的考试日期」：四级本位，只改日期（6 月场 / 12 月场） */
+/* 「我的 → 我的考试」：选题 + 填日期 */
 function vExamPick() {
   const cur = examInfo();
   const dn = daysToExam();
+  const groups = [];
+  EXAMS.forEach(e => {
+    let g = groups.find(x => x.n === e.group);
+    if (!g) { g = { n: e.group, items: [] }; groups.push(g); }
+    g.items.push(e);
+  });
+  const miss = missingTypes();
   return `
-  <div class="sec">我的考试日期</div>
+  <div class="sec">我的考试</div>
   <div class="card tight">
-    <div class="meta">四级一年两场（6 月 / 12 月）。填你报名的那一场，首页倒计时按这个算。
-      具体日期以<b>中国教育考试网</b>公告为准。</div>
-    <div class="row" style="margin:8px 0">
+    <div class="meta">选你要考的那一个，首页倒计时和文案会跟着变。题目由你用「我的题目」导入。</div>
+    ${groups.map(g => `
+      <div class="meta" style="margin:10px 0 5px;color:var(--fg3)">${esc(g.n)}</div>
+      <div class="row" style="margin:0;gap:6px">
+        ${g.items.map(e => `<button class="btn ${e.id === cur.id ? '' : 'ghost'} sm" data-exam="${e.id}"
+          style="font-size:12px;padding:5px 10px">${esc(e.short || e.name)}</button>`).join('')}
+      </div>`).join('')}
+    <div class="meta" style="margin-top:12px">
+      当前：<b>${esc(cur.name)}</b>${
+        cur.builtin ? ' · 站内已有题库' : ' · <span style="color:var(--warn)">站内还没有这个考试的题库</span>'}
+    </div>
+    <div class="meta" style="margin-top:6px">题型：
+      ${(cur.types || []).map(t => {
+        const q = QTYPES[t] || {};
+        return q.impl
+          ? `<b>${esc(q.name)}</b>`
+          : `<span style="color:var(--warn)">${esc(q.name || t)}（还没做）</span>`;
+      }).join(' · ')}
+    </div>
+    ${miss.length ? `<div class="meta" style="margin-top:6px">
+      还差 <b>${miss.length}</b> 种题型没实现，所以这个考试暂时只能用已支持的四种
+      （仔细阅读 / 长篇匹配 / 选词填空 / 听力听写）。</div>` : ''}
+    <div class="row" style="margin:12px 0 0">
       <input type="date" id="examdate" value="${cur.date}"
-        style="font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
-      <button class="btn sm" data-examsave="1">保存</button>
+        style="font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
+      <button class="btn sm" data-examsave="1">保存日期</button>
       ${cur.custom ? `<button class="btn ghost sm" data-examreset="1">恢复默认</button>` : ''}
     </div>
-    <div class="meta">当前：<b>${esc(examShort())}</b>${
-      cur.date ? ' · ' + cur.date : ' · <span style="color:var(--warn)">还没设日期</span>'}${
-      cur.custom ? ' · 你自己设的' : ' · 默认值'}${
-      examPassed() ? ' · <span style="color:var(--warn)">这场已经结束了</span>' : ''}${
-      dn !== null ? ' · 还有 ' + dn + ' 天' : ''}</div>
+    <div class="meta" style="margin-top:6px">${esc(cur.note || '')}${
+      dn !== null ? ' · 还有 ' + dn + ' 天' : ' · 还没设日期'}</div>
   </div>`;
 }
 const S = { bank: null, dict: null, listen: null };
@@ -381,17 +513,36 @@ function vHome() {
     ${(() => {
       const cur = examInfo(), dn = daysToExam();
       if (dn === null) {
-        return `<div class="ttl">还没设置考试日期</div>
-          <div class="meta" style="margin:6px 0 0">去「我的 → 我的考试日期」填一下，这里就有倒计时了。</div>`;
+        return `<div class="ttl">${esc(cur.name)}</div>
+          <div class="meta" style="margin:6px 0 0">还没设考试日期 —— 去「我的 → 我的考试」填一下，这里就有倒计时了。</div>`;
       }
       if (examPassed()) {
-        return `<div class="ttl">${esc(examShort())}（${cur.date}）已经结束了</div>
-          <div class="meta" style="margin:6px 0 0">去「我的 → 我的考试日期」改成你要考的下一场。</div>`;
+        return `<div class="ttl">${esc(cur.short)}（${cur.date}）已经结束了</div>
+          <div class="meta" style="margin:6px 0 0">去「我的 → 我的考试」改成你要考的下一场。</div>`;
       }
-      return `<div class="ttl">距 ${esc(examShort())} 还有 <span style="color:var(--brand)">${dn}</span> 天</div>
-        <div class="meta" style="margin:6px 0 0">${cur.date}${cur.site ? ' · ' + EXAM_STRUCT : ''}。</div>`;
+      return `<div class="ttl">距 ${esc(cur.short)} 还有 <span style="color:var(--brand)">${dn}</span> 天</div>
+        <div class="meta" style="margin:6px 0 0">${cur.date}${cur.struct ? ' · ' + esc(cur.struct) : ''}。</div>`;
     })()}
   </div>
+
+  ${(() => {
+    const cur = examInfo();
+    if (cur.builtin) return '';
+    const miss = missingTypes();
+    return `<div class="card tight">
+      <div class="meta">
+        <b>${esc(cur.name)}</b> 站里还没有内置题库。
+        去「我的 → 我的题目」把你自己手上的资料导进来就能刷。<br>
+        ${miss.length ? `这个考试还要补 <b>${miss.length}</b> 种题型（${miss.map(t => (QTYPES[t] || {}).name || t).join(' / ')}），
+        现在先用已支持的四种。` : ''}
+        想先熟悉一下操作，也可以直接刷四级的题。
+      </div>
+      <div class="row">
+        <button class="btn ghost sm" data-exam="cet4">先刷四级</button>
+        <button class="btn ghost sm" data-go="me">去导入我的题目</button>
+      </div>
+    </div>`;
+  })()}
 
   <div class="stat-grid">
     <div class="stat"><div class="k">连续打卡</div><div class="v">${streak()} <small>天</small></div></div>
@@ -1193,7 +1344,7 @@ const HELP = {
   me: {
     t: '这一页在说什么',
     items: [
-      '<b>我的考试日期</b>：四级一年两场（6 月 / 12 月），填你报名的那一场，首页倒计时跟着变；日期以中国教育考试网公告为准。',
+      '<b>我的考试</b>：选你要考的那一个（四级、六级、雅思、托福…），首页名称和倒计时跟着变；日期自己填。题目由「我的题目」导入。',
       '<b>我的题目</b>：这个站<b>不带任何版权资料</b>。你自己买的、老师发的资料，导进来只存在你这台设备的浏览器里，不上传、别人看不到。',
       '<b>关于与版权</b>：开源语料取自 Project Gutenberg（公有领域），原创题由作者撰写，<b>不含四级真题</b>。',
       '所有数据（错题 / 生词 / 打卡）都在<b>你自己浏览器本地</b>，清浏览器数据会丢。',
@@ -1423,20 +1574,28 @@ document.addEventListener('click', e => {
     }
     return;
   }
-  /* 我的考试日期（四级一年两场，只改日期） */
+  /* 选考试 / 改考试日期 */
+  if (e.target.closest('[data-exam]')) {
+    const id = e.target.closest('[data-exam]').dataset.exam;
+    if (!EXAMS_BY_ID[id]) return;
+    LS.set('exam', { id });          // 换考试时不带旧日期
+    render();
+    toast('已选择：' + (EXAMS_BY_ID[id].short || EXAMS_BY_ID[id].name));
+    return;
+  }
   if (e.target.closest('[data-examsave]')) {
     const dtEl = $('#examdate');
     const dt = (dtEl && dtEl.value) || '';
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dt)) { toast('请先选一个考试日期'); return; }
-    LS.set('exam', { date: dt });
+    LS.set('exam', { id: examInfo().id, date: dt });
     render();
     toast('已把考试日期设为 ' + dt);
     return;
   }
   if (e.target.closest('[data-examreset]')) {
-    LS.set('exam', null);
+    LS.set('exam', { id: examInfo().id });
     render();
-    toast('已恢复默认考试日期');
+    toast('已恢复默认日期');
     return;
   }
   if (e.target.closest('[data-clearvocab]')) {
