@@ -118,6 +118,31 @@ button.sm { padding: 8px 14px; font-size: 13px; border-radius: 8px; }
 button:disabled { opacity: .45; cursor: not-allowed; }
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
 
+/* 试卷结构表（选考试 / 我的考试） */
+table.pt { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.pt th {
+  text-align: left; font-weight: 600; color: var(--fg3); font-size: 11.5px;
+  padding: 0 0 6px; border-bottom: 1px solid var(--line); white-space: nowrap;
+}
+table.pt th.num, table.pt td.num { text-align: right; width: 42px; white-space: nowrap; }
+table.pt td { padding: 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.pt tr:last-child td { border-bottom: 0; }
+table.pt td b { font-weight: 600; }
+table.pt td.num { color: var(--fg); font-variant-numeric: tabular-nums; }
+table.pt td.num i { color: var(--fg3); font-style: normal; }
+table.pt tfoot td {
+  border-bottom: 0; border-top: 1px solid var(--line);
+  padding-top: 8px; font-weight: 600; color: var(--fg2);
+}
+table.pt .blk {
+  display: inline-block; font-style: normal; font-size: 10.5px; margin-left: 6px;
+  color: var(--brand); background: var(--brand-soft); border-radius: 5px; padding: 1px 5px;
+  vertical-align: 1px;
+}
+table.pt .pr { display: block; color: var(--fg3); font-size: 11.5px; margin-top: 2px; line-height: 1.45; }
+/* 表格外也会用（比如"试卷结构"标题下面的来源说明） */
+.pr { display: block; color: var(--fg3); font-size: 11.5px; margin-top: 2px; line-height: 1.45; }
+
 /* 首页 */
 .stat-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
 .stat { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }

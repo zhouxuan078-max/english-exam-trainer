@@ -37,91 +37,265 @@ const QTYPES = {
   speak:     { name: '口语',     impl: false, unit: '题' },
 };
 
-/* 考试清单。group 决定在界面上怎么分组；数组顺序就是推进顺序。
-   types 按**官方试卷结构**的顺序排（写作 → 听力 → 阅读 → 翻译）。
-   builtin:true = 站里已经内置了这个考试的题库（现在全部为 false）。 */
+/* 考试清单。
+   只收**大学阶段及以上**的考试（本科 / 研究生 / 出国 / 职场），不含中小学。
+
+   ⚠️ 每个考试的 `paper` 是它的**试卷结构**（题型 / 题量 / 分值），
+   `types` 由 paper 派生 —— 这样"题型漏了写作翻译"那种错在结构上就不可能再犯：
+   试卷结构本身就等于题型清单，改一处两处都对。
+
+   ⚠️ 有的考试分方向（考研英语一/二、雅思 A/G 类…），方向会改变题目构成，
+   所以放在 `variants` 里，由使用者选一次。
+*/
 const EXAMS = [
-  /* ——— 大学 ——— */
+  /* ———————— 大学 ———————— */
   { id: 'cet4', group: '大学', name: '大学英语四级（CET-4）', short: '大学英语四级',
-    date: '2026-12-12', builtin: false,
-    types: ['write', 'listening', 'cloze', 'matching', 'careful', 'translate'],
-    struct: '写作 15% · 听力 35% · 阅读 35% · 翻译 15%',
-    note: '上午 9:00-11:20，共 57 题 125 分钟；425 分为六级报考门槛' },
+    date: '2026-12-12',
+    total: { q: 57, score: 100, min: 125 },
+    paper: [
+      { t: 'write',     label: '写作',               count: 1,  score: 15 },
+      { t: 'listening', label: '听力理解',           count: 25, score: 35,
+        parts: '短篇新闻 7 · 长对话 8 · 听力篇章 10' },
+      { t: 'cloze',     label: '词汇理解（选词填空）', count: 10, score: 5,  block: '阅读理解 40 分钟' },
+      { t: 'matching',  label: '长篇阅读（匹配）',    count: 10, score: 10, block: '阅读理解 40 分钟' },
+      { t: 'careful',   label: '仔细阅读',           count: 10, score: 20, block: '阅读理解 40 分钟' },
+      { t: 'translate', label: '翻译（汉译英段落）',  count: 1,  score: 15 },
+    ],
+    src: '中国教育考试网官方试卷结构',
+    note: '上午 9:00-11:20；425 分为六级报考门槛' },
+
   { id: 'cet6', group: '大学', name: '大学英语六级（CET-6）', short: '大学英语六级',
-    date: '', builtin: false,
-    types: ['write', 'listening', 'cloze', 'matching', 'careful', 'translate'],
-    struct: '写作 15% · 听力 35% · 阅读 35% · 翻译 15%',
+    date: '',
+    total: { q: 57, score: 100, min: 130 },
+    paper: [
+      { t: 'write',     label: '写作',               count: 1,  score: 15 },
+      { t: 'listening', label: '听力理解',           count: 25, score: 35,
+        parts: '长对话 8 · 听力篇章 7 · 讲话/报道/讲座 10' },
+      { t: 'cloze',     label: '词汇理解（选词填空）', count: 10, score: 5,  block: '阅读理解 40 分钟' },
+      { t: 'matching',  label: '长篇阅读（匹配）',    count: 10, score: 10, block: '阅读理解 40 分钟' },
+      { t: 'careful',   label: '仔细阅读',           count: 10, score: 20, block: '阅读理解 40 分钟' },
+      { t: 'translate', label: '翻译（汉译英段落）',  count: 1,  score: 15 },
+    ],
+    src: '中国教育考试网官方试卷结构',
     note: '结构与四级相同、难度更高；四级 425 分以上才能报考' },
+
   { id: 'tem4', group: '大学', name: '英语专业四级（TEM-4）', short: '英语专业四级',
-    date: '', builtin: false,
-    types: ['listen', 'listening', 'single', 'cloze', 'careful', 'write'],
-    note: '英语专业大二考；**听写是专四特有的题型**' },
-  { id: 'kaoyan', group: '大学', name: '考研英语（一 / 二）', short: '考研英语',
-    date: '', builtin: false,
-    types: ['cloze', 'careful', 'matching', 'translate', 'write'],
-    note: '12 月下旬考；英语一、英语二题型略有差别' },
+    date: '',
+    total: { q: 67, score: 100, min: 130 },
+    paper: [
+      { t: 'listen',    label: '听写（Dictation）',  count: 1,  score: 10,
+        parts: '专四独有 —— 四六级不考听写' },
+      { t: 'listening', label: '听力理解',           count: 20, score: 20,
+        parts: '讲座 10 · 对话 10（单选）' },
+      { t: 'single',    label: '语言知识（语法词汇）', count: 20, score: 20 },
+      { t: 'cloze',     label: '完形填空',           count: 10, score: 10 },
+      { t: 'careful',   label: '阅读理解',           count: 15, score: 20 },
+      { t: 'write',     label: '写作',               count: 1,  score: 20,
+        parts: '便条 + 作文' },
+    ],
+    note: '英语专业大二考；听写是专四特有的题型，四六级不考' },
 
-  /* ——— 出国 ——— */
+  { id: 'kaoyan', group: '大学', name: '考研英语', short: '考研英语',
+    date: '',
+    variants: [
+      { id: 'en1', name: '英语一', note: '学术型硕士' },
+      { id: 'en2', name: '英语二', note: '专业型硕士' },
+    ],
+    total: { q: 52, score: 100, min: 180 },
+    paper: [
+      { t: 'cloze',     label: '完形填空（英语知识运用）', count: 20, score: 10 },
+      { t: 'careful',   label: '阅读理解 Part A',    count: 20, score: 40 },
+      { t: 'matching',  label: '阅读理解 Part B（新题型）', count: 5, score: 10 },
+      { t: 'translate', label: '翻译（英语一：英译汉 5 句 / 英语二：汉译英段落）', count: 5, score: 10 },
+      { t: 'write',     label: '写作',               count: 2,  score: 30,
+        parts: 'Part A 应用文 10 分 + Part B 短文 20 分' },
+    ],
+    src: '英语一结构；英语二题型相同、翻译与写作分值略有差别',
+    note: '12 月下旬考；英语一、英语二难度不同' },
+
+  /* ———————— 出国 ———————— */
   { id: 'ielts', group: '出国', name: '雅思 IELTS', short: '雅思',
-    date: '', builtin: false,
-    types: ['listening', 'single', 'judge', 'matching', 'gap', 'write', 'speak'],
-    note: '听说读写四项，机考 / 纸笔可选' },
+    date: '',
+    variants: [
+      { id: 'a', name: 'A 类（学术）', note: '出国留学用' },
+      { id: 'g', name: 'G 类（培训）', note: '移民 / 工作用' },
+    ],
+    total: { q: 85, score: 9, min: 165 },
+    paper: [
+      { t: 'listening', label: '听力（4 段录音）',   count: 40, score: 25, parts: '约 30 分钟 + 10 分钟誊写' },
+      // 阅读固定 40 题，但三种小题型各占几题每场都不同 —— 所以不写死题量
+      { t: 'single',    label: '阅读 · 选择题',      count: 0, score: 0,
+        parts: 'A 类 3 篇文章；G 类生活题材为主' },
+      { t: 'judge',     label: '阅读 · 判断 / 匹配', count: 0, score: 0,
+        parts: 'True / False / Not Given、标题匹配、信息匹配' },
+      { t: 'gap',       label: '阅读 · 填空 / 简答', count: 0, score: 0,
+        parts: '摘要填空、句子填空、表格填空、简短回答' },
+      { t: 'write',     label: '写作',               count: 2,  score: 25,
+        parts: 'A 类：图表描述 150 词 + 议论文 250 词；G 类：书信 + 议论文' },
+      { t: 'speak',     label: '口语',               count: 3,  score: 25, parts: '11–14 分钟，面对面' },
+    ],
+    src: '总分 9 分制，四项各占 25%，取平均；阅读 40 题由上面三类小题型混排组成',
+    note: '考试日期由自己报名决定；机考 / 纸笔可选' },
+
   { id: 'toefl', group: '出国', name: '托福 TOEFL iBT', short: '托福',
-    date: '', builtin: false,
-    types: ['single', 'listening', 'write', 'speak'],
-    note: '全机考，阅读听力以选择题为主' },
+    date: '',
+    total: { q: 54, score: 120, min: 116 },
+    paper: [
+      { t: 'single',    label: '阅读',               count: 20, score: 30, parts: '2 篇 · 约 35 分钟' },
+      { t: 'listening', label: '听力',               count: 28, score: 30, parts: '约 36 分钟' },
+      { t: 'speak',     label: '口语',               count: 4,  score: 30, parts: '4 个任务 · 16 分钟（对着机器说）' },
+      { t: 'write',     label: '写作',               count: 2,  score: 30, parts: '综合写作 + 学术讨论 · 29 分钟' },
+    ],
+    note: '全机考；总分 120，四项各 30 分' },
+
   { id: 'duolingo', group: '出国', name: '多邻国英语测试（DET）', short: '多邻国',
-    date: '', builtin: false,
-    types: ['single', 'gap', 'listening', 'write', 'speak'],
-    note: '线上考、便宜、出分快' },
+    date: '',
+    total: { score: 160, min: 60 },
+    paper: [
+      { t: 'single',    label: '选择 / 判断类',      count: 0, score: 0, parts: '自适应出题，题量因人而异' },
+      { t: 'gap',       label: '填空 / 听写',        count: 0, score: 0 },
+      { t: 'listening', label: '听力（含朗读句子）',  count: 0, score: 0 },
+      { t: 'write',     label: '写作 / 看图写句',     count: 0, score: 0 },
+      { t: 'speak',     label: '口语（含看图说话）',  count: 0, score: 0 },
+    ],
+    src: '自适应考试，题量和题型随答题表现变化，没有固定卷面',
+    note: '线上考、便宜、出分快；总分 160' },
+
   { id: 'pte', group: '出国', name: 'PTE Academic', short: 'PTE',
-    date: '', builtin: false,
-    types: ['single', 'gap', 'listening', 'write', 'speak'],
+    date: '',
+    total: { score: 90, min: 115 },
+    paper: [
+      { t: 'speak',     label: '口语（第一部分）',   count: 0, score: 0, parts: '朗读、复述、描述图表…' },
+      { t: 'write',     label: '写作（含总结听写）',  count: 0, score: 0 },
+      { t: 'single',    label: '阅读',               count: 0, score: 0 },
+      { t: 'gap',       label: '填空（阅读 / 听力）', count: 0, score: 0 },
+      { t: 'listening', label: '听力',               count: 0, score: 0 },
+    ],
+    src: '三大部分：口语写作 / 阅读 / 听力，共约 2 小时',
     note: '全机考，出分快，澳洲认可度高' },
+
   { id: 'gre', group: '出国', name: 'GRE', short: 'GRE',
-    date: '', builtin: false, types: ['single', 'gap', 'write'],
-    note: '美国研究生入学考试' },
+    date: '',
+    total: { score: 340, min: 118 },
+    paper: [
+      { t: 'gap',       label: '填空（Text Completion / Sentence Equivalence）', count: 0, score: 0 },
+      { t: 'single',    label: '阅读理解',           count: 0, score: 0, parts: 'Verbal 两个 section' },
+      { t: 'write',     label: '分析性写作（Analytical Writing）', count: 1, score: 0,
+        parts: 'Issue 任务 30 分钟（0–6 分）' },
+    ],
+    note: 'Verbal / Quant 各 130–170 分，写作 0–6 分' },
+
   { id: 'sat', group: '出国', name: 'SAT', short: 'SAT',
-    date: '', builtin: false, types: ['single', 'write'],
-    note: '美国本科入学考试' },
+    date: '',
+    total: { q: 98, score: 1600, min: 134 },
+    paper: [
+      { t: 'single',    label: '阅读与文法（Reading & Writing）', count: 54, score: 800, parts: '64 分钟' },
+      { t: 'single',    label: '数学',               count: 44, score: 800, parts: '70 分钟' },
+    ],
+    src: '2024 起改为自适应机考，写作部分已取消',
+    note: '总分 1600；机考自适应' },
 
-  /* ——— 中学 ——— */
-  { id: 'gaokao', group: '中学', name: '高考英语', short: '高考英语',
-    date: '', builtin: false,
-    types: ['listening', 'careful', 'matching', 'cloze', 'gap', 'write'],
-    note: '多数省份 6 月 8 日下午考；各省题型略有差别' },
-  { id: 'zhongkao', group: '中学', name: '中考英语', short: '中考英语',
-    date: '', builtin: false,
-    types: ['listening', 'single', 'cloze', 'careful', 'gap', 'write'],
-    note: '各地时间与题型不同，以本省安排为准' },
-  { id: 'fce', group: '中学', name: '剑桥通用五级 · FCE', short: '剑桥 FCE',
-    date: '', builtin: false,
-    types: ['listening', 'careful', 'matching', 'write', 'speak'],
-    note: '第三级，约相当于雅思 5.5–6.5' },
+  /* ———————— 职场 ———————— */
+  { id: 'bec', group: '职场', name: '商务英语 BEC', short: 'BEC',
+    date: '',
+    variants: [
+      { id: 'p', name: '初级', note: 'Preliminary' },
+      { id: 'v', name: '中级', note: 'Vantage' },
+      { id: 'h', name: '高级', note: 'Higher' },
+    ],
+    total: { score: 100, min: 165 },
+    paper: [
+      { t: 'single',    label: '阅读',               count: 0, score: 25, parts: '45 分钟；各级题量不同' },
+      { t: 'write',     label: '写作',               count: 2,  score: 25, parts: '45 分钟' },
+      { t: 'listening', label: '听力',               count: 30, score: 25, parts: '40 分钟' },
+      { t: 'speak',     label: '口语',               count: 3,  score: 25, parts: '16 分钟，两人一组' },
+    ],
+    note: '初 / 中 / 高三级；听说读写各占 25%' },
 
-  /* ——— 小学 / 初中 ——— */
-  { id: 'pet', group: '小学·初中', name: '剑桥通用五级 · PET', short: '剑桥 PET',
-    date: '', builtin: false,
-    types: ['listening', 'careful', 'matching', 'write', 'speak'],
-    note: '第二级，约相当于中考到高考之间' },
-  { id: 'ket', group: '小学·初中', name: '剑桥通用五级 · KET', short: '剑桥 KET',
-    date: '', builtin: false,
-    types: ['listening', 'single', 'matching', 'write', 'speak'],
-    note: '第一级，小学高年级到初中' },
-  { id: 'yle', group: '小学·初中', name: '剑桥少儿英语（YLE）', short: '剑桥少儿',
-    date: '', builtin: false,
-    types: ['listening', 'single', 'write', 'speak'],
-    note: 'Starters / Movers / Flyers 三级，幼儿园大班到小学' },
-
-  /* ——— 职业 ——— */
-  { id: 'bec', group: '职业', name: '商务英语 BEC', short: 'BEC',
-    date: '', builtin: false,
-    types: ['listening', 'single', 'matching', 'write', 'speak'],
-    note: '初级 / 中级 / 高级' },
-  { id: 'toeic', group: '职业', name: '托业 TOEIC', short: '托业',
-    date: '', builtin: false, types: ['listening', 'single'],
-    note: '职场英语，只考听力和阅读' },
+  { id: 'toeic', group: '职场', name: '托业 TOEIC（听力与阅读）', short: '托业',
+    date: '',
+    total: { q: 200, score: 990, min: 120 },
+    paper: [
+      { t: 'listening', label: '听力',               count: 100, score: 495,
+        parts: '照片 6 · 问答 25 · 对话 39 · 独白 30 · 45 分钟' },
+      { t: 'single',    label: '阅读',               count: 100, score: 495,
+        parts: '句子填空 30 · 短文填空 16 · 阅读理解 54 · 75 分钟' },
+    ],
+    note: '只考听力和阅读；总分 10–990' },
 ];
+
+/* 有的考试分方向，方向会改变题目构成 —— 由使用者选一次 */
+function curVariant(ex) {
+  ex = ex || curExam();
+  const sel = LS.get('exam', null) || {};
+  if (sel.id !== ex.id || !sel.variant) return null;
+  return (ex.variants || []).find(v => v.id === sel.variant) || null;
+}
+
+function paperOf(ex) {
+  ex = ex || curExam();
+  const v = curVariant(ex);
+  if (v && v.paper && v.paper.length) return v.paper;
+  return ex.paper || [];
+}
+
+function totalOf(ex) {
+  ex = ex || curExam();
+  const v = curVariant(ex);
+  return (v && v.total) ? v.total : (ex.total || null);
+}
+
+/* 题型从试卷结构派生 —— 唯一来源，不会再漏 */
+function typesOf(ex) {
+  ex = ex || curExam();
+  const seen = [];
+  paperOf(ex).forEach(p => { if (seen.indexOf(p.t) < 0) seen.push(p.t); });
+  return seen;
+}
+
+/* 某个题型在这个考试里的规格（题量 / 分值 / 细分） */
+function paperRowOf(t, ex) {
+  ex = ex || curExam();
+  const hit = paperOf(ex).filter(p => p.t === t);
+  if (!hit.length) return null;
+  return {
+    label: hit[0].label, parts: hit.map(h => h.parts).filter(Boolean).join('；'),
+    count: hit.reduce((a, h) => a + (h.count || 0), 0),
+    score: hit.reduce((a, h) => a + (h.score || 0), 0),
+  };
+}
+
+/* 试卷结构表 —— 选考试页和「我的考试」两处共用。
+   自适应考试的题量/分值写死了也不知道，就显示 "—"。 */
+function paperTable(ex) {
+  const rows = paperOf(ex);
+  if (!rows.length) return '<div class="empty">这个考试没有固定卷面。</div>';
+  const t = totalOf(ex);
+  const num = v => (v ? v : '<i>—</i>');
+  return `<table class="pt">
+    <thead><tr><th>题型</th><th class="num">题量</th><th class="num">分值</th></tr></thead>
+    <tbody>${rows.map(r => `<tr>
+      <td><b>${esc(r.label)}</b>${
+        r.block ? `<em class="blk">${esc(r.block)}</em>` : ''}${
+        r.parts ? `<span class="pr">${esc(r.parts)}</span>` : ''}</td>
+      <td class="num">${num(r.count)}</td>
+      <td class="num">${num(r.score)}</td>
+    </tr>`).join('')}</tbody>
+    ${t ? `<tfoot><tr><td>合计</td><td class="num">${num(t.q)}</td>
+      <td class="num">${esc(String(t.score))}</td></tr></tfoot>` : ''}
+  </table>`;
+}
+
+/* 方向选择器 —— 考研英语一/二、雅思 A/G 类、BEC 初/中/高。
+   方向会改变题目构成，所以要让人选一次。 */
+function variantRow(ex, active) {
+  if (!(ex.variants || []).length) return '';
+  return `<div class="row" style="margin:0;gap:6px;flex-wrap:wrap">
+    ${ex.variants.map(v => `<button class="btn ${v.id === active ? '' : 'ghost'} sm"
+      data-exv="${ex.id}:${v.id}" title="${esc(v.note || '')}"
+      style="font-size:12px;padding:5px 10px">${esc(v.name)}</button>`).join('')}
+  </div>`;
+}
 
 const EXAMS_BY_ID = {};
 EXAMS.forEach(e => { EXAMS_BY_ID[e.id] = e; });
@@ -133,16 +307,36 @@ function curExam() {
   return EXAMS_BY_ID[DEFAULT_EXAM_ID];
 }
 
-/* 当前考试信息。日期：使用者填过就用他填的，否则用考试自带的（可能为空）。 */
+/* 写考试选择 —— 一律在现有选择上**合并**，避免"改个日期把方向弄丢"这类 bug。
+   要整体换考试就用 LS.set('exam', {id}) 直接覆盖。 */
+function setExam(patch) {
+  const old = LS.get('exam', null) || {};
+  const switching = patch.id && old.id && patch.id !== old.id;
+  // 换考试：日期作废，但同一个 patch 里带的方向要留下
+  const rec = switching ? { id: patch.id, variant: patch.variant }
+                        : Object.assign({}, old, patch);
+  Object.keys(rec).forEach(k => {
+    if (rec[k] === null || rec[k] === undefined || rec[k] === '') delete rec[k];
+  });
+  LS.set('exam', rec);
+  return rec;
+}
+
+/* 当前考试信息。日期：使用者填过就用他填的，否则用考试自带的（可能为空）。
+   types / paper / total 都从试卷结构派生，不单独维护。 */
 function examInfo() {
   const ex = curExam();
   const sel = LS.get('exam', null) || {};
   const custom = !!(sel.id === ex.id && sel.date);
+  const v = curVariant(ex);
   return {
     id: ex.id, name: ex.name, short: ex.short || ex.name,
     date: custom ? sel.date : (ex.date || ''),
-    note: ex.note || '', struct: ex.struct || '',
-    types: ex.types || [], builtin: !!ex.builtin, custom,
+    note: ex.note || '', src: ex.src || '',
+    types: typesOf(ex), paper: paperOf(ex), total: totalOf(ex),
+    variants: ex.variants || [], variant: v ? v.id : null,
+    variantName: v ? v.name : '',
+    custom,
   };
 }
 
@@ -151,11 +345,11 @@ function examShort() { return examInfo().short || '考试'; }
 /* 这个考试里"已经能用"和"还没做"的题型 */
 function implTypes(id) {
   const ex = EXAMS_BY_ID[id || examInfo().id] || {};
-  return (ex.types || []).filter(t => (QTYPES[t] || {}).impl);
+  return typesOf(ex).filter(t => (QTYPES[t] || {}).impl);
 }
 function missingTypes(id) {
   const ex = EXAMS_BY_ID[id || examInfo().id] || {};
-  return (ex.types || []).filter(t => !(QTYPES[t] || {}).impl);
+  return typesOf(ex).filter(t => !(QTYPES[t] || {}).impl);
 }
 
 /* 阅读类题型（它们共用"阅读"页里的那排 tab） */
@@ -185,9 +379,10 @@ function daysToExam() {
   return Math.max(0, Math.ceil((o - Date.now()) / 86400000));
 }
 
-/* 「我的 → 我的考试」：选题 + 填日期 */
+/* 「我的 → 我的考试」：换考试 + 选方向 + 看试卷结构 + 填日期 */
 function vExamPick() {
   const cur = examInfo();
+  const ex = curExam();
   const dn = daysToExam();
   const groups = [];
   EXAMS.forEach(e => {
@@ -199,38 +394,49 @@ function vExamPick() {
   return `
   <div class="sec">我的考试</div>
   <div class="card tight">
-    <div class="meta">选你要考的那一个，首页倒计时和文案会跟着变。题目由你用「我的题目」导入。</div>
+    <div class="meta">选你要考的那一个 —— 首页倒计时、底部导航、题型都会跟着换。</div>
     ${groups.map(g => `
       <div class="meta" style="margin:10px 0 5px;color:var(--fg3)">${esc(g.n)}</div>
-      <div class="row" style="margin:0;gap:6px">
+      <div class="row" style="margin:0;gap:6px;flex-wrap:wrap">
         ${g.items.map(e => `<button class="btn ${e.id === cur.id ? '' : 'ghost'} sm" data-exam="${e.id}"
           style="font-size:12px;padding:5px 10px">${esc(e.short || e.name)}</button>`).join('')}
       </div>`).join('')}
-    <div class="meta" style="margin-top:12px">
-      当前：<b>${esc(cur.name)}</b>${
-        cur.builtin ? ' · 站内已有题库' : ' · <span style="color:var(--warn)">站内还没有这个考试的题库</span>'}
-    </div>
-    <div class="meta" style="margin-top:6px">题型：
-      ${(cur.types || []).map(t => {
-        const q = QTYPES[t] || {};
-        return q.impl
-          ? `<b>${esc(q.name)}</b>`
-          : `<span style="color:var(--warn)">${esc(q.name || t)}（还没做）</span>`;
-      }).join(' · ')}
-    </div>
-    ${miss.length ? `<div class="meta" style="margin-top:6px">
-      还差 <b>${miss.length}</b> 种题型没实现，所以这个考试暂时只能用已支持的四种
-      （仔细阅读 / 长篇匹配 / 选词填空 / 听力听写）。</div>` : ''}
-    <div class="row" style="margin:12px 0 0">
+  </div>
+
+  <div class="sec">当前：${esc(cur.name)}${cur.variantName ? ' · ' + esc(cur.variantName) : ''}</div>
+
+  ${(cur.variants || []).length ? `<div class="card tight">
+    <div class="meta" style="margin:0 0 8px">这个考试分方向，方向不同题目就不一样 —— 先选一个。</div>
+    ${variantRow(ex, cur.variant)}
+  </div>` : ''}
+
+  <div class="card tight">
+    <div class="meta" style="margin:0 0 8px"><b>试卷结构</b>${
+      cur.src ? `<span class="pr">${esc(cur.src)}</span>` : ''}</div>
+    ${paperTable(ex)}
+    ${miss.length ? `<div class="meta" style="margin-top:9px">
+      其中 <b>${miss.length}</b> 种题型还在做：${
+        miss.map(t => esc((QTYPES[t] || {}).name || t)).join(' / ')}。
+      做好的先用着，剩下的会陆续补上。</div>` : ''}
+    ${cur.note ? `<div class="meta" style="margin-top:6px;color:var(--fg3)">${esc(cur.note)}</div>` : ''}
+  </div>
+
+  <div class="sec">考试日期</div>
+  <div class="card tight">
+    <div class="meta" style="margin:0 0 8px">填你自己的报名日期，首页就有倒计时。不填也行。</div>
+    <div class="row" style="margin:0">
       <input type="date" id="examdate" value="${cur.date}"
         style="font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
-      <button class="btn sm" data-examsave="1">保存日期</button>
+      <button class="btn sm" data-examsave="1">保存</button>
       ${cur.custom ? `<button class="btn ghost sm" data-examreset="1">恢复默认</button>` : ''}
     </div>
-    <div class="row" style="margin-top:6px">${esc(cur.note || '')}${
-      dn !== null ? ' · 还有 ' + dn + ' 天' : ' · 还没设日期'}</div>
-    <div class="row" style="margin:12px 0 0">
-      <button class="btn ghost sm" data-repick="1">重新选考试</button>
+    <div class="meta" style="margin-top:7px">${
+      dn !== null ? '还有 <b>' + dn + '</b> 天' : '还没设日期'}</div>
+  </div>
+
+  <div class="card tight">
+    <div class="row" style="margin:0">
+      <button class="btn ghost sm" data-repick="1">回到选考试页</button>
     </div>
   </div>`;
 }
@@ -511,6 +717,9 @@ let route = 'home', readType = 'careful';
 let helpOpen = false;      // 右上角「!」展开的说明面板
 let onboarding = false;    // 首次进来：先选考试
 let onboardReturn = 'home'; // 从哪一页点进"选考试"的，返回时退回去
+let onboardStep = 0;        // 0 = 列考试；1 = 确认页（方向 + 日期 + 试卷结构）
+let onboardExam = null;     // 确认页正在看的是哪个考试
+let onboardVariant = null;  // 确认页选的方向（还没落盘）
 
 function go(r) {
   route = r;
@@ -582,7 +791,9 @@ window.addEventListener('hashchange', () => {
 
 /* ---------- 顶栏 ---------- */
 function header() {
-  let title = examShort(), sub = '把今天的量做完就行';
+  const ei = examInfo();
+  let title = ei.short, sub = ei.variantName
+    ? ei.variantName + ' · 把今天的量做完就行' : '把今天的量做完就行';
   if (route === 'vocab') { title = '生词本'; sub = '点短文里的词就能收藏'; }
   else if (route === 'me') { title = '我的'; sub = '数据都在你自己手机上'; }
   else if (route.indexOf('type:') === 0) {
@@ -621,24 +832,22 @@ function vHome() {
           <div class="meta" style="margin:6px 0 0">去「我的 → 我的考试」改成你要考的下一场。</div>`;
       }
       return `<div class="ttl">距 ${esc(cur.short)} 还有 <span style="color:var(--brand)">${dn}</span> 天</div>
-        <div class="meta" style="margin:6px 0 0">${cur.date}${cur.struct ? ' · ' + esc(cur.struct) : ''}。</div>`;
+        <div class="meta" style="margin:6px 0 0">${cur.date}${
+          cur.variantName ? ' · ' + esc(cur.variantName) : ''}。</div>`;
     })()}
   </div>
 
   ${(() => {
     const cur = examInfo();
-    if (cur.builtin) return '';
     const miss = missingTypes();
     return `<div class="card tight">
       <div class="meta">
-        <b>${esc(cur.name)}</b> 站里还没有内置题库。
-        去「我的 → 我的题目」把你自己手上的资料导进来就能刷。<br>
-        ${miss.length ? `这个考试还要补 <b>${miss.length}</b> 种题型（${miss.map(t => (QTYPES[t] || {}).name || t).join(' / ')}），
-        现在先用已支持的四种。` : ''}
-        想先熟悉一下操作，也可以直接刷四级的题。
+        站里<b>不带任何题目</b>（避免版权问题）。去「我的 → 我的题目」
+        把你手上的资料导进来就能刷。
+        ${miss.length ? `这个考试还有 <b>${miss.length}</b> 种题型在做：${
+          miss.map(t => esc((QTYPES[t] || {}).name || t)).join(' / ')}。` : ''}
       </div>
       <div class="row">
-        <button class="btn ghost sm" data-exam="cet4">先刷四级</button>
         <button class="btn ghost sm" data-go="me">去导入我的题目</button>
       </div>
     </div>`;
@@ -1494,9 +1703,12 @@ function vHelp() {
 }
 
 /* 首次进来的"选考试"页。也用于从「我的」里回来换考试 ——
-   所以底部一定要有"出去"的路：误点了、选错了都得能退。 */
+   分两步：先选考试，再确认（方向 + 日期 + 看试卷结构）。
+   底部一定有"出去"的路：误点了、选错了都得能退。 */
 function vOnboard() {
   const picked = !!LS.get('onboarded', false);
+  const ex = onboardExam && EXAMS_BY_ID[onboardExam];
+  if (onboardStep === 1 && ex) return vOnboardConfirm(ex, picked);
   const groups = [];
   EXAMS.forEach(e => {
     let g = groups.find(x => x.n === e.group);
@@ -1506,19 +1718,19 @@ function vOnboard() {
   return `
   <div class="card">
     <div class="ttl">你要考哪一个？</div>
-    <div class="meta">选完就进训练台，界面只出现这个考试需要的题型。
+    <div class="meta">选完进去，界面只出现这个考试需要的题型。
       ${picked ? '这次是回来换考试的。' : ''}</div>
   </div>
   ${groups.map(g => `
     <div class="sec">${esc(g.n)}</div>
     <div class="card tight">
-      <div class="row" style="margin:0;gap:6px">
-        ${g.items.map(e => `<button class="btn ${e.builtin ? '' : 'ghost'} sm" data-exam="${e.id}"
+      <div class="row" style="margin:0;gap:6px;flex-wrap:wrap">
+        ${g.items.map(e => `<button class="btn ghost sm" data-exam="${e.id}"
           style="font-size:12px;padding:6px 11px">${esc(e.short || e.name)}</button>`).join('')}
       </div>
     </div>`).join('')}
   <div class="card tight">
-    <div class="meta">现在站里<b>还没有任何题目</b> —— 选完考试，去「我的 → 我的题目」
+    <div class="meta">站里<b>不带任何题目</b> —— 选完考试，去「我的 → 我的题目」
       把自己手上的资料导进来就能刷。这个站<b>不带任何版权内容</b>，题目由使用者自己提供。</div>
   </div>
   <div class="card tight">
@@ -1531,16 +1743,69 @@ function vOnboard() {
   </div>`;
 }
 
+/* 第二步：确认这个考试。有方向的先选方向，再看它能考什么、几道题、多少分，
+   最后填一个自己的考试日期（不填也行）。 */
+function vOnboardConfirm(ex, picked) {
+  const hasV = (ex.variants || []).length > 0;
+  const v = onboardVariant ? (ex.variants || []).find(x => x.id === onboardVariant) : null;
+  const miss = missingTypes(ex.id);
+  const today = LS.get('exam', null) || {};
+  const dfltDate = (today.id === ex.id && today.date) ? today.date : (ex.date || '');
+  return `
+  <div class="card">
+    <div class="ttl">${esc(ex.name)}</div>
+    ${ex.note ? `<div class="meta" style="margin-top:5px">${esc(ex.note)}</div>` : ''}
+  </div>
+
+  ${hasV ? `<div class="sec">考哪一个方向</div>
+  <div class="card tight">
+    <div class="meta" style="margin:0 0 8px">方向不同，题目构成就不一样 —— 先选一个。</div>
+    ${variantRow(ex, onboardVariant)}
+    ${v && v.note ? `<div class="meta" style="margin-top:7px;color:var(--fg3)">${esc(v.note)}</div>` : ''}
+  </div>` : ''}
+
+  <div class="sec">要考什么</div>
+  <div class="card tight">
+    ${paperTable(ex)}
+    ${miss.length ? `<div class="meta" style="margin-top:9px">
+      其中 <b>${miss.length}</b> 种题型还在做：${
+        miss.map(t => esc((QTYPES[t] || {}).name || t)).join(' / ')}。
+      做好的那几个现在就能刷。</div>` : ''}
+    ${ex.src ? `<div class="meta" style="margin-top:6px;color:var(--fg3)">来源：${esc(ex.src)}</div>` : ''}
+  </div>
+
+  <div class="sec">你的考试日期</div>
+  <div class="card tight">
+    <div class="meta" style="margin:0 0 8px">填上自己的报名日期，首页就有倒计时。不填也行。</div>
+    <div class="row" style="margin:0">
+      <input type="date" id="obdate" value="${dfltDate}"
+        style="font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
+    </div>
+  </div>
+
+  <div class="card tight">
+    <div class="row" style="margin:0;gap:8px;flex-wrap:wrap">
+      <button class="btn" data-obbegin="1">${hasV && !v ? '先选个方向' : '就这个，进去'}</button>
+      <button class="btn ghost" data-obback="1">← 换一个考试</button>
+    </div>
+    <div class="meta" style="margin-top:8px">
+      ${picked ? '确认后回到训练台。' : '确认后进训练台；日期以后也能在「我的」里改。'}
+    </div>
+  </div>`;
+}
+
 function render() {
   if (onboarding) {
+    const picking = onboardStep === 0 || !EXAMS_BY_ID[onboardExam];
     $('#hdTitle').textContent = '四级训练台';
-    $('#hdSub').textContent = '先选一下你要考的试';
+    $('#hdSub').textContent = picking ? '先选一下你要考的试' : '确认一下方向、日期和卷面';
     $('#hdCount').textContent = '';
     $('#hdClock').textContent = '';
     const hb0 = $('#hdHelp');
     if (hb0) hb0.style.display = 'none';
     renderNav();
     $('#view').innerHTML = vOnboard();
+    window.scrollTo(0, 0);
     return;
   }
   const hb1 = $('#hdHelp');
@@ -1764,9 +2029,11 @@ document.addEventListener('click', e => {
     if (first) {
       LS.set('exam', { id: DEFAULT_EXAM_ID });
       LS.set('onboarded', true);
-      toast('先用四级的题库刷着，随时能在「我的」里换');
+      toast('先用四级刷着，随时能在「我的」里换');
     }
     onboarding = false;
+    onboardStep = 0;
+    onboardExam = null;
     route = first ? 'home' : (onboardReturn || 'home');
     if (location.hash !== '#' + route) history.replaceState(null, '', '#' + route);
     render();
@@ -1776,21 +2043,75 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-repick]')) {
     onboardReturn = route;
     onboarding = true;
+    onboardStep = 0;
+    onboardExam = null;
     window.scrollTo(0, 0);
     render();
     return;
   }
-  /* 选考试 / 改考试日期 */
+  /* 选方向。两种场合共用一个入口：
+     选考试流程里 = 只记在内存，等"进去"再落盘；
+     「我的考试」里 = 直接落盘。 */
+  if (e.target.closest('[data-exv]')) {
+    const parts = e.target.closest('[data-exv]').dataset.exv.split(':');
+    const exId = parts[0], vid = parts[1] || null;
+    if (onboarding) {
+      onboardVariant = vid;
+    } else {
+      setExam({ id: exId, variant: vid });
+      toast('已选方向：' + ((EXAMS_BY_ID[exId].variants || []).find(v => v.id === vid) || {}).name);
+    }
+    render();
+    return;
+  }
+  /* 确认页：退回第一步 */
+  if (e.target.closest('[data-obback]')) {
+    onboardStep = 0;
+    onboardExam = null;
+    onboardVariant = null;
+    window.scrollTo(0, 0);
+    render();
+    return;
+  }
+  /* 确认页：确认并进去 */
+  if (e.target.closest('[data-obbegin]')) {
+    const ex = EXAMS_BY_ID[onboardExam];
+    if (!ex) return;
+    if ((ex.variants || []).length && !onboardVariant) {
+      toast('先选一个方向'); return;
+    }
+    const wasPicked = !!LS.get('onboarded', false);
+    const dateEl = $('#obdate');
+    const date = (dateEl && dateEl.value) || '';
+    const rec = { id: ex.id };
+    if (onboardVariant) rec.variant = onboardVariant;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) rec.date = date;
+    LS.set('exam', rec);
+    LS.set('onboarded', true);
+    onboarding = false;
+    onboardStep = 0;
+    onboardExam = null;
+    onboardVariant = null;
+    route = wasPicked ? (onboardReturn || 'home') : 'home';
+    if (location.hash !== '#' + route) history.replaceState(null, '', '#' + route);
+    render();
+    toast('已选：' + (ex.short || ex.name)
+      + (rec.variant ? ' · ' + (((ex.variants || []).find(v => v.id === rec.variant) || {}).name || '') : ''));
+    return;
+  }
+  /* 第一步：点一个考试 → 进确认页（首次进来）／ 直接换（「我的」里） */
   if (e.target.closest('[data-exam]')) {
     const id = e.target.closest('[data-exam]').dataset.exam;
     if (!EXAMS_BY_ID[id]) return;
-    LS.set('exam', { id });          // 换考试时不带旧日期
-    if (onboarding) {                // 首次选完就进训练台
-      LS.set('onboarded', true);
-      onboarding = false;
-      route = 'home';
-      if (location.hash !== '#home') history.replaceState(null, '', '#home');
+    if (onboarding) {
+      onboardExam = id;
+      onboardStep = 1;
+      onboardVariant = null;
+      window.scrollTo(0, 0);
+      render();
+      return;
     }
+    LS.set('exam', { id });          // 换考试不带旧日期、旧方向
     render();
     toast('已选择：' + (EXAMS_BY_ID[id].short || EXAMS_BY_ID[id].name));
     return;
@@ -1799,13 +2120,13 @@ document.addEventListener('click', e => {
     const dtEl = $('#examdate');
     const dt = (dtEl && dtEl.value) || '';
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dt)) { toast('请先选一个考试日期'); return; }
-    LS.set('exam', { id: examInfo().id, date: dt });
+    setExam({ id: examInfo().id, date: dt });
     render();
     toast('已把考试日期设为 ' + dt);
     return;
   }
   if (e.target.closest('[data-examreset]')) {
-    LS.set('exam', { id: examInfo().id });
+    setExam({ date: null });
     render();
     toast('已恢复默认日期');
     return;
@@ -1876,6 +2197,9 @@ async function boot() {
 
     // 第一次进来：先让用户选考试，选完再进训练台
     onboarding = !LS.get('onboarded', false);
+    onboardStep = 0;
+    onboardExam = null;
+    onboardVariant = null;
 
     const h = location.hash.replace('#', '');
     if (['home', 'vocab', 'me'].includes(h) || h.indexOf('type:') === 0) route = h;
