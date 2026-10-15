@@ -281,6 +281,7 @@ function vRead() {
 }
 
 function originTag(it) {
+  if (it.origin === 'mine') return `<span class="tag" style="background:var(--brand-soft);color:var(--brand);border-color:transparent">我的题目</span>`;
   if (it.origin === 'local') return `<span class="tag" style="background:var(--brand-soft);color:var(--brand);border-color:transparent">自备材料</span>`;
   return it.origin === 'open'
     ? `<span class="tag open">开源语料</span>`
@@ -571,6 +572,243 @@ function exportCSV() {
   download('\ufeff' + lines.join('\r\n'), 'cet4_生词.csv', 'text/csv;charset=utf-8');
 }
 
+/* ---------- 我的题目（使用者自己导入，只存在他自己浏览器里） ----------
+   设计意图：这个站是"工具"，不是"内容提供方"。
+   官方 / 版权资料由使用者自己放进来，内容责任在那个人自己身上。
+   和 Anki 一样：Anki 不带内容，牌组由用户自己导入。
+
+   支持的输入：
+     1. 文本格式（见 格式示例，照抄即可）—— 给不太懂技术的人用
+     2. JSON 格式（本站"导出我的题目"产出的文件）—— 方便同学之间互传
+   ---------------------------------------------------------- */
+
+const MYFORMAT_DEMO = `=== 仔细阅读 ===
+TITLE: 我的练习 · 仔细阅读
+PASSAGE:
+第一段正文……
+
+第二段正文……
+Q: 这道题问什么？
+A. 选项一
+B. 选项二
+C. 选项三
+D. 选项四
+ANSWER: B
+EXPLAIN: 解析写在这里（可省略）
+Q: 第二道题问什么？
+A. 选项一
+B. 选项二
+C. 选项三
+D. 选项四
+ANSWER: C
+EXPLAIN: 想写就写，不写也行
+
+=== 选词填空 ===
+TITLE: 我的练习 · 选词填空
+PASSAGE:
+正文里用 {{1}} {{2}} 标出空格位置。
+OPTIONS: word1 word2 word3
+ANSWERS: 1:word1 2:word2
+
+=== 长篇匹配 ===
+TITLE: 我的练习 · 长篇匹配
+PARAGRAPHS:
+A. 段落 A 的内容
+B. 段落 B 的内容
+STATEMENTS:
+- 一句陈述 | A
+- 另一句陈述 | B`;
+
+function myBankTypes() {
+  const my = LS.get('mybank', null);
+  return (my && Array.isArray(my.types)) ? my.types : [];
+}
+function myBankCount() {
+  return myBankTypes().reduce((a, t) => a + t.items.length, 0);
+}
+
+/* --- 文本格式解析 --- */
+
+function _splitSections(text) {
+  const raw = String(text || '').replace(/\r\n?/g, '\n');
+  const blocks = [];
+  let cur = null;
+  for (const line of raw.split('\n')) {
+    const m = line.match(/^\s*={2,}\s*(.+?)\s*={2,}\s*$/);
+    if (m) { cur = { name: m[1].trim(), lines: [] }; blocks.push(cur); continue; }
+    if (cur) cur.lines.push(line);
+  }
+  return blocks;
+}
+
+function _parseCareful(lines) {
+  let title = '';
+  const paras = [], questions = [];
+  let buf = [], q = null;
+  const flush = () => { const s = buf.join('\n').trim(); if (s) paras.push(s); buf = []; };
+  const closeQ = () => { if (q && q.q) questions.push(q); q = null; };
+  for (const raw of lines) {
+    const t = raw.trim();
+    if (!t) { if (!q) flush(); continue; }
+    let m;
+    if ((m = t.match(/^TITLE\s*[:：]\s*(.*)$/i))) { title = m[1].trim(); continue; }
+    if ((m = t.match(/^PASSAGE\s*[:：]\s*(.*)$/i))) { flush(); if (m[1].trim()) buf.push(m[1].trim()); continue; }
+    if ((m = t.match(/^Q\s*[:：]\s*(.*)$/i))) { closeQ(); flush(); q = { q: m[1].trim(), options: [], answer: 0, explain: '' }; continue; }
+    if ((m = t.match(/^([A-Da-d])\s*[.．、:：]\s*(.*)$/))) {
+      if (q) q.options.push(m[2].trim());
+      continue;
+    }
+    if ((m = t.match(/^ANSWER\s*[:：]\s*([A-Da-d])/i))) {
+      if (q) q.answer = m[1].toUpperCase().charCodeAt(0) - 65;
+      continue;
+    }
+    if ((m = t.match(/^EXPLAIN\s*[:：]\s*(.*)$/i))) { if (q) q.explain = m[1].trim(); continue; }
+    if (q) { if (q.explain) q.explain += t; else if (!q.options.length) q.q += t; }
+    else buf.push(t);
+  }
+  closeQ(); flush();
+  if (!questions.length) return null;
+  return { title: title || '我的仔细阅读', passage: paras, questions };
+}
+
+function _parseCloze(lines) {
+  let title = '', passage = '', options = [], answers = {};
+  const buf = [];
+  for (const raw of lines) {
+    const t = raw.trim();
+    if (!t) continue;
+    let m;
+    if ((m = t.match(/^TITLE\s*[:：]\s*(.*)$/i))) { title = m[1].trim(); continue; }
+    if ((m = t.match(/^PASSAGE\s*[:：]\s*(.*)$/i))) { if (m[1].trim()) buf.push(m[1].trim()); continue; }
+    if ((m = t.match(/^OPTIONS\s*[:：]\s*(.*)$/i))) {
+      options = m[1].split(/[\s,，、;；]+/).map(s => s.trim()).filter(Boolean);
+      continue;
+    }
+    if ((m = t.match(/^ANSWERS?\s*[:：]\s*(.*)$/i))) {
+      const re = /(\d+)\s*[:：.．]\s*([A-Za-z][A-Za-z'\-]*)/g;
+      let mm;
+      while ((mm = re.exec(m[1]))) answers[mm[1]] = mm[2];
+      continue;
+    }
+    buf.push(t);
+  }
+  passage = buf.join('\n');
+  if (!passage || !Object.keys(answers).length) return null;
+  const words = Object.values(answers);
+  const extra = words.filter(w => !options.includes(w));
+  return { title: title || '我的选词填空', passage, options: options.concat(extra), answers };
+}
+
+function _parseMatching(lines) {
+  let title = '', mode = '';
+  const ps = [], sts = [];
+  for (const raw of lines) {
+    const t = raw.trim();
+    if (!t) continue;
+    let m;
+    if ((m = t.match(/^TITLE\s*[:：]\s*(.*)$/i))) { title = m[1].trim(); continue; }
+    if (/^PARAGRAPHS?\s*[:：]/i.test(t)) { mode = 'p'; continue; }
+    if (/^STATEMENTS?\s*[:：]/i.test(t)) { mode = 's'; continue; }
+    if (mode === 'p' && (m = t.match(/^([A-Za-z])\s*[.．、:：]\s*(.*)$/))) {
+      ps.push({ letter: m[1].toUpperCase(), text: m[2].trim() });
+      continue;
+    }
+    if (mode === 's' && (m = t.match(/^[-*•]?\s*(.*?)\s*[|｜]\s*([A-Za-z])\s*$/))) {
+      sts.push({ s: m[1].trim(), answer: m[2].toUpperCase() });
+      continue;
+    }
+  }
+  if (!ps.length || !sts.length) return null;
+  return { title: title || '我的长篇匹配', paragraphs: ps, statements: sts };
+}
+
+function parseMyBankText(text) {
+  const out = { careful: [], matching: [], cloze: [] };
+  let seq = 0;
+  for (const b of _splitSections(text)) {
+    const nm = b.name;
+    let item = null, type = null;
+    if (/选词|cloze/i.test(nm)) { item = _parseCloze(b.lines); type = 'cloze'; }
+    else if (/匹配|matching/i.test(nm)) { item = _parseMatching(b.lines); type = 'matching'; }
+    else if (/阅读|careful|reading/i.test(nm)) { item = _parseCareful(b.lines); type = 'careful'; }
+    if (!item) continue;
+    seq++;
+    item.id = 'mine-' + type + '-' + seq;
+    item.origin = 'mine';
+    out[type].push(item);
+  }
+  return out;
+}
+
+const MY_TYPE_META = {
+  careful: { name: '仔细阅读', score: 14.2 },
+  matching: { name: '长篇匹配', score: 7.1 },
+  cloze: { name: '选词填空', score: 3.55 },
+};
+
+function parseMyBankInput(text) {
+  const s = String(text || '').trim();
+  if (!s) return { ok: false, msg: '内容是空的' };
+  // JSON：本站导出的格式
+  if (s[0] === '{' || s[0] === '[') {
+    let obj;
+    try { obj = JSON.parse(s); } catch (e) { return { ok: false, msg: 'JSON 格式有错：' + e.message }; }
+    if (Array.isArray(obj)) return { ok: false, msg: '这像是一个数组，请用本站导出的完整文件（含 types 字段）' };
+    if (!obj || !Array.isArray(obj.types)) return { ok: false, msg: 'JSON 里没有 types 字段，不是本站导出的格式' };
+    const types = obj.types.map(t => ({
+      type: t.type, typeName: t.typeName || (MY_TYPE_META[t.type] || {}).name || t.type,
+      note: t.note || '', scorePerQ: t.scorePerQ || (MY_TYPE_META[t.type] || {}).score || 0,
+      items: (t.items || []).map(i => Object.assign({}, i, { origin: 'mine' })),
+    })).filter(t => t.items.length);
+    if (!types.length) return { ok: false, msg: 'JSON 里没有任何题目' };
+    return { ok: true, types };
+  }
+  // 文本格式
+  const parsed = parseMyBankText(s);
+  const types = [];
+  for (const k of ['careful', 'matching', 'cloze']) {
+    if (!parsed[k].length) continue;
+    types.push({
+      type: k, typeName: (MY_TYPE_META[k] || {}).name || k,
+      note: '我自己导入的题目，只保存在这台设备的浏览器里。',
+      scorePerQ: (MY_TYPE_META[k] || {}).score || 0,
+      items: parsed[k],
+    });
+  }
+  if (!types.length) {
+    return { ok: false, msg: '没解析出题目。检查一下是不是缺少 === 仔细阅读 === 这样的分节标题' };
+  }
+  return { ok: true, types };
+}
+
+/* 把「我的题目」合并进当前题库（重建，避免重复叠加） */
+function rebuildBank() {
+  if (!S.base) return;
+  const clone = JSON.parse(JSON.stringify(S.base));
+  const prepend = (types) => {
+    for (const t of (types || [])) {
+      const bt = clone.types.find(x => x.type === t.type);
+      if (bt) bt.items = t.items.concat(bt.items);
+      else clone.types.push(t);
+    }
+  };
+  prepend(S.localTypes);
+  prepend(myBankTypes());
+  S.bank = clone;
+  S.bank.hasLocal = S.localCount || 0;
+  S.bank.hasMine = myBankCount();
+}
+
+function importMyBank(text) {
+  const r = parseMyBankInput(text);
+  if (!r.ok) return r;
+  const n = r.types.reduce((a, t) => a + t.items.length, 0);
+  LS.set('mybank', { version: today(), types: r.types });
+  rebuildBank();
+  render();
+  return { ok: true, n, types: r.types.map(t => t.typeName + ' ' + t.items.length + ' 篇').join('、') };
+}
+
 /* ---------- 我的 ---------- */
 /* 只有在本机服务下才显示"手机扫码"入口（线上站没有 /qr 这个路由） */
 function isLocalServe() {
@@ -601,6 +839,36 @@ function vMe() {
 
   <div class="sec">错题本</div>
   ${vWrong()}
+
+  <div class="sec">我的题目（只有我自己看得见）</div>
+  <div class="card tight">
+    <div class="meta">
+      这个站<b>不带任何版权资料</b>。你自己买的、老师发的、自己整理的题目，
+      可以在这里导进来 —— 只存在<b>你这台设备的浏览器</b>里，
+      不上传、别人也看不到。${myBankCount() ? ` 已导入 <b>${myBankCount()}</b> 篇，会排在每个题型最前面。` : ''}
+    </div>
+    <div class="row">
+      <button class="btn ghost sm" data-mytoggle="1">导入我的题目</button>
+      ${myBankCount() ? `<button class="btn ghost sm" data-myexport="1">导出（可以传给别人）</button>
+      <button class="btn ghost sm" data-myclear="1">清空</button>` : ''}
+    </div>
+    <div id="mypanel" style="display:none">
+      <div style="margin:8px 0">
+        <input type="file" id="myfile" accept=".txt,.json" style="font-size:12px">
+      </div>
+      <textarea id="mytext" rows="7" placeholder="也可以直接把题目文本粘贴在这里"
+        style="width:100%;box-sizing:border-box;font-family:ui-monospace,Consolas,monospace;font-size:12px;padding:8px;border:1px solid var(--line);border-radius:8px"></textarea>
+      <div class="row">
+        <button class="btn" data-myimport="1">导入</button>
+        <button class="btn ghost sm" data-myfmt="1">看格式示例</button>
+      </div>
+      <pre id="myfmt" style="display:none;font-size:11px;line-height:1.55;background:var(--bg);padding:10px;border-radius:8px;overflow:auto;margin:0">${esc(MYFORMAT_DEMO)}</pre>
+      <div class="meta" style="margin-top:8px">
+        ⚠ 请只导入<b>你自己有权使用</b>的材料。这个站只是工具，
+        不带内容，也不替使用者承担内容责任。
+      </div>
+    </div>
+  </div>
 
   <div class="sec">关于与版权</div>
   <div class="card">
@@ -816,6 +1084,37 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-vback]')) { vMode = 'list'; render(); return; }
   if (e.target.closest('[data-csvexport]')) { exportCSV(); return; }
   if (e.target.closest('[data-export]')) { exportTSV(); return; }
+  /* 我的题目：导入 / 导出 / 清空 */
+  if (e.target.closest('[data-mytoggle]')) {
+    const p = $('#mypanel');
+    if (p) p.style.display = (p.style.display === 'block') ? 'none' : 'block';
+    return;
+  }
+  if (e.target.closest('[data-myfmt]')) {
+    const p = $('#myfmt');
+    if (p) p.style.display = (p.style.display === 'block') ? 'none' : 'block';
+    return;
+  }
+  if (e.target.closest('[data-myimport]')) {
+    const ta = $('#mytext');
+    const r = importMyBank(ta ? ta.value : '');
+    toast(r.ok ? ('导入成功：' + r.types) : ('导入失败：' + r.msg));
+    return;
+  }
+  if (e.target.closest('[data-myexport]')) {
+    download(JSON.stringify({
+      version: today(), exportedAt: new Date().toISOString(),
+      note: '四级训练台 · 我的题目。在「我的 → 导入我的题目」里粘贴或选这个文件即可。',
+      types: myBankTypes(),
+    }, null, 1), 'cet4_我的题目.json', 'application/json');
+    return;
+  }
+  if (e.target.closest('[data-myclear]')) {
+    if (confirm('清空我自己导入的题目？（其它数据不受影响）')) {
+      LS.set('mybank', null); rebuildBank(); render(); toast('已清空我的题目');
+    }
+    return;
+  }
   if (e.target.closest('[data-clearvocab]')) {
     if (confirm('清空生词本？')) { vocab = []; LS.set('vocab', vocab); render(); } return;
   }
@@ -829,6 +1128,21 @@ document.addEventListener('click', e => {
       render();
     } return;
   }
+});
+
+/* 选了文件 → 读进文本框（让使用者看得见内容，再自己点「导入」） */
+document.addEventListener('change', e => {
+  if (!e.target || e.target.id !== 'myfile') return;
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const fr = new FileReader();
+  fr.onload = () => {
+    const ta = $('#mytext');
+    if (ta) ta.value = String(fr.result || '');
+    toast('已读入 ' + f.name + '（' + Math.round(f.size / 1024) + ' KB），点「导入」');
+  };
+  fr.onerror = () => toast('文件读取失败');
+  fr.readAsText(f, 'utf-8');
 });
 
 /* ---------- 启动 ----------
@@ -849,23 +1163,21 @@ async function boot() {
         fetch('data/listening.json').then(r => r.json()).catch(() => null)
       ]);
     }
-    S.bank = bank; S.listen = listen;
+    S.base = bank; S.listen = listen;
 
     if (!IN) {
-      // 合并本地自备题库（site/data/bank.local.json）。
-      // 公开站上不会有这个文件，所以线上永远只有开源 + 原创内容。
+      // 自备题库（site/data/bank.local.json）：只有本地版才有这个文件
       try {
         const local = await fetch('data/bank.local.json').then(r => r.json());
         if (local && Array.isArray(local.types) && local.types.length) {
-          for (const lt of local.types) {
-            const bt = S.bank.types.find(t => t.type === lt.type);
-            if (!bt) S.bank.types.push(lt);
-            else bt.items = lt.items.concat(bt.items);   // 自备材料排在前面
-          }
-          S.bank.hasLocal = local.types.reduce((a, t) => a + t.items.length, 0);
+          S.localTypes = local.types;
+          S.localCount = local.types.reduce((a, t) => a + t.items.length, 0);
         }
       } catch (e) { /* 没有本地题库，正常情况 */ }
     }
+    // 把「自备材料」和「我自己导入的题目」合并进来。
+    // 用重建而不是追加，避免重复调用时越叠越多。
+    rebuildBank();
 
     const h = location.hash.replace('#', '');
     if (['home', 'read', 'listen', 'vocab', 'me'].includes(h)) route = h;
