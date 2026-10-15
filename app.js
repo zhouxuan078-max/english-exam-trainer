@@ -689,10 +689,13 @@ function wordPopHtml(raw, hit) {
 document.addEventListener('click', e => {
   if (e.target.closest('[data-copyopen]')) {
     const ctx0 = curReadItem();
-    const txt0 = ctx0 ? (((ensureDraft(ctx0.t, ctx0.i).x) || {}).text
-      || (((LS.get('ans:' + ctx0.key, null) || {}).x) || {}).text) : '';
-    if (!txt0) { toast('还没写东西'); return; }
-    copyText(txt0).then(okc => toast(okc ? '已复制，粘贴给 AI 就能打分' : '复制失败，请手动选中复制'));
+    if (!ctx0) return;
+    const txt0 = ((ensureDraft(ctx0.t, ctx0.i).x) || {}).text
+      || (((LS.get('ans:' + ctx0.key, null) || {}).x) || {}).text || '';
+    if (!txt0.trim()) { toast('还没写东西'); return; }
+    copyText(aiPromptFor(ctx0.t, ctx0.it, txt0)).then(okc =>
+      toast(okc ? '已复制：题目 + 要求 + 你的作答，粘给 AI 就行'
+                : '复制失败，请手动选中复制'));
     return;
   }
   if (e.target.closest('[data-clearul]')) {
@@ -1217,8 +1220,9 @@ function vItem(t, i) {
         h += `<div class="sub"><div class="meta">你的作答</div>
           <div style="white-space:pre-wrap;line-height:1.8">${esc(myText) || '<i>（空）</i>'}</div>
           <div class="meta" style="margin-top:8px">
-            <button class="btn ghost sm" data-copyopen="1">复制我的作答</button>
-            <span style="margin-left:6px">发给 AI，可以让它按这场考试的标准打分</span>
+            <button class="btn ghost sm" data-copyopen="1">复制给 AI 打分</button>
+            <span style="margin-left:6px">会连题目要求、这项的卷面权重一起复制，
+            粘给 AI 它就知道按什么标准评</span>
           </div></div>`;
       }
     }
@@ -2267,6 +2271,34 @@ function spkStart(phase, secs) {
     }
     spkPaint();
   }, 1000);
+}
+
+/* 拼一份可以直接粘给 AI 的提问。
+   ⚠️ 只复制作文本身是不够的 —— AI 不知道这是哪场考试、按什么标准评。
+      所以把"考试名 + 题目要求 + 这题在卷面里的权重 + 你的作答 + 要它怎么评"
+      一起打包。 */
+function aiPromptFor(t, it, myText) {
+  const ei = examInfo();
+  const isTr = t.type === 'translate';
+  const row = paperRowOf(t.type);
+  const L = [];
+  L.push(isTr
+    ? '请按' + ei.name + '的翻译评分标准，评价我下面这段译文。'
+    : '请按' + ei.name + '的写作评分标准，评价我下面这篇作文。');
+  L.push('');
+  L.push((isTr ? '【原文】' : '【题目要求】') + (it.material || ''));
+  if (row && row.pct) {
+    L.push('【这项在卷面里】占 ' + row.pct + '%'
+      + (row.score ? '（满卷 ' + fullOf() + ' 分制里约 ' + row.score + ' 分）' : ''));
+  }
+  L.push('');
+  L.push(isTr ? '【我的译文】' : '【我的作文】');
+  L.push(myText);
+  L.push('');
+  L.push('请给出：① 一个分数或等级；② 分内容、结构、语言三方面说主要问题；'
+    + '③ 具体的改进建议，并把明显的语法/用词错误逐条列出来。'
+    + '评价请用中文，例子保留英文。');
+  return L.join('\n');
 }
 
 /* 复制文本：优先用 clipboard API，不行就退回 textarea + execCommand
