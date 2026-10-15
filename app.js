@@ -391,6 +391,7 @@ function vExamPick() {
     g.items.push(e);
   });
   const miss = missingTypes();
+  const tot = totalOf(ex);
   return `
   <div class="sec">我的考试</div>
   <div class="card tight">
@@ -411,14 +412,17 @@ function vExamPick() {
   </div>` : ''}
 
   <div class="card tight">
-    <div class="meta" style="margin:0 0 8px"><b>试卷结构</b>${
-      cur.src ? `<span class="pr">${esc(cur.src)}</span>` : ''}</div>
-    ${paperTable(ex)}
-    ${miss.length ? `<div class="meta" style="margin-top:9px">
-      其中 <b>${miss.length}</b> 种题型还在做：${
-        miss.map(t => esc((QTYPES[t] || {}).name || t)).join(' / ')}。
-      做好的先用着，剩下的会陆续补上。</div>` : ''}
-    ${cur.note ? `<div class="meta" style="margin-top:6px;color:var(--fg3)">${esc(cur.note)}</div>` : ''}
+    <details class="fold">
+      <summary>看这场考试的试卷结构${
+        tot ? `（${paperOf(ex).length} 项 · ${tot.q ? tot.q + ' 题 · ' : ''}满分 ${tot.score}）` : ''}</summary>
+      ${paperTable(ex)}
+      ${miss.length ? `<div class="meta" style="margin-top:9px">
+        其中 <b>${miss.length}</b> 种题型还在做：${
+          miss.map(t => esc((QTYPES[t] || {}).name || t)).join(' / ')}。
+        做好的先用着，剩下的会陆续补上。</div>` : ''}
+      ${cur.src ? `<div class="meta" style="margin-top:6px;color:var(--fg3)">来源：${esc(cur.src)}</div>` : ''}
+      ${cur.note ? `<div class="meta" style="margin-top:4px;color:var(--fg3)">${esc(cur.note)}</div>` : ''}
+    </details>
   </div>
 
   <div class="sec">考试日期</div>
