@@ -1720,9 +1720,12 @@ function vHelp() {
   </div>`;
 }
 
-/* 选考试（第一步）：只放「阶段分类 + 考试名」，不加说明文字。
+/* 选考试（第一步）：只放「阶段分类 + 考试名」，别的什么都不加。
    点一个考试就进第二步（方向 + 卷面 + 日期）。
-   底部保留"出去"的路：误点了、选错了都得能退。 */
+
+   ⚠️ 这一页**没有"跳过"**：既然这一页存在的意义就是让你选，就不该有溜走的口子。
+      唯一的例外是"从「我的」回来换考试"——那是误点进来的，得给条退路，
+      否则人就卡在这一页出不去了。所以出口按钮只在 picked 时才渲染。 */
 function vOnboard() {
   const picked = !!LS.get('onboarded', false);
   const ex = onboardExam && EXAMS_BY_ID[onboardExam];
@@ -1742,11 +1745,9 @@ function vOnboard() {
           style="font-size:13px;padding:9px 13px">${esc(e.short || e.name)}</button>`).join('')}
       </div>
     </div>`).join('')}
-  <div class="card tight">
-    <div class="row" style="margin:0">
-      <button class="btn ghost sm" data-obout="1">${picked ? '← 返回' : '跳过，先用四级'}</button>
-    </div>
-  </div>`;
+  ${picked ? `<div class="row" style="margin:16px 0 0">
+      <button class="btn ghost sm" data-obout="1">← 返回</button>
+    </div>` : ''}`;
 }
 
 /* 第二步：确认这个考试。有方向的先选方向，再看它能考什么、几道题、多少分，
@@ -2030,12 +2031,14 @@ document.addEventListener('click', e => {
     return;
   }
   /* 选考试页的出路：首次进来 = 先用四级；从「我的」回来 = 退回原来那一页 */
+  /* 选考试页的唯一出口：只在"从「我的」回来换考试"时才有这个按钮，
+     点了就退回进来之前那一页。首次进来没有出口 —— 必须选一个。
+     下面的 first 分支只是兜底（万一状态不一致，点了也别把人卡住）。 */
   if (e.target.closest('[data-obout]')) {
     const first = !LS.get('onboarded', false);
     if (first) {
       LS.set('exam', { id: DEFAULT_EXAM_ID });
       LS.set('onboarded', true);
-      toast('先用四级刷着，随时能在「我的」里换');
     }
     onboarding = false;
     onboardStep = 0;
