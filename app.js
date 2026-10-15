@@ -15,7 +15,25 @@ let stats = LS.get('stats', { ans: 0, right: 0 });
 
 const $ = s => document.querySelector(s);
 const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const today = () => new Date().toISOString().slice(0, 10);
+/* 日期一律按【本地日历】算。
+   ⚠ 别用 toISOString().slice(0,10)：那按 UTC 输出，在 UTC+8 的晚上
+   会算成第二天、凌晨 0-8 点又会算成前一天，跟 addDays 拼在一起还会
+   互相错开一天（曾经导致"记得"按钮把复习日设回今天，队列永远清不空）。 */
+const pad2 = n => String(n).padStart(2, '0');
+const ymd = d => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+const today = () => ymd(new Date());
+function addDays(dateStr, n) {
+  const p = dateStr.split('-').map(Number);
+  return ymd(new Date(p[0], p[1] - 1, p[2] + n));
+}
+function download(text, name, type) {
+  const blob = new Blob([text], { type });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
 
 function toast(msg) {
   let el = $('#toast');
@@ -123,7 +141,7 @@ document.addEventListener('click', e => {
 
 function addVocab(word, phon, mean) {
   if (vocab.some(v => v.word === word)) return;
-  vocab.unshift({ word, phon, mean, t: today() });
+  vocab.unshift({ word, phon, mean, t: today(), n: 0, due: today() });
   LS.set('vocab', vocab);
 }
 
@@ -137,7 +155,7 @@ function streak() {
   let n = 0;
   const d = new Date();
   for (;;) {
-    const s = d.toISOString().slice(0, 10);
+    const s = ymd(d);          // 必须和 today() 同一套本地日历，否则凌晨会断
     if (days.includes(s)) { n++; d.setDate(d.getDate() - 1); } else break;
   }
   return n;
@@ -210,7 +228,7 @@ function vHome() {
   <div class="entry">
     <a href="#read" data-go="read"><div class="n">📖 阅读</div><div class="d">${nRead} 篇 · 三种题型</div></a>
     <a href="#listen" data-go="listen"><div class="n">🎧 听力</div><div class="d">${S.listen ? S.listen.items.length : 0} 句听写</div></a>
-    <a href="#vocab" data-go="vocab"><div class="n">🔖 生词本</div><div class="d">${vocab.length} 个词</div></a>
+    <a href="#vocab" data-go="vocab"><div class="n">🔖 生词本</div><div class="d">${vocab.length} 个词${srsDueCount() ? ' · 待复习 ' + srsDueCount() : ''}</div></a>
     <a href="#me" data-go="me"><div class="n">📊 我的</div><div class="d">错题 ${wrong.length} 条</div></a>
   </div>
 
@@ -220,7 +238,7 @@ function vHome() {
       1. <b>仔细阅读 1 篇</b>（8 分钟）— 分值最高，每题 14.2 分<br>
       2. <b>听力听写 5 句</b>（6 分钟）— 练耳朵<br>
       3. <b>选词填空 1 篇</b>（8 分钟）— 最后做，别恋战<br>
-      4. 做完把生词收藏，导出给 Anki
+      4. ${srsDueCount() ? `<b>复习生词 ${srsDueCount()} 个</b>（约 ${Math.max(2, Math.round(srsDueCount() * 0.25))} 分钟）— 在「生词本」里` : '做完把生词收藏，明天就会出现在复习队列里'}
     </div>
   </div>
 
@@ -436,34 +454,121 @@ function lcResult(it, st) {
   <div class="exp" style="margin-top:12px">原文：<b>${esc(it.text)}</b></div>`;
 }
 
-/* ---------- 生词本 ---------- */
+/* ---------- 生词本 + 生词复习（内置遗忘曲线排期，不用装 Anki） ---------- */
+/* 第 n 次答对之后，隔几天再见：1 → 2 → 4 → 7 → 15 → 30 → 60 → 120 天 */
+const SRS_LADDER = [1, 2, 4, 7, 15, 30, 60, 120];
+
+/* 老数据没有 due 字段，按"今天到期"处理，这样一上线就能复习 */
+function srsDue(v) { return (v.due || '1970-01-01') <= today(); }
+function srsDueCount() { return vocab.filter(srsDue).length; }
+
+/* 复习态（不落盘；每次进来自动按到期时间组队） */
+let vMode = 'list', vQueue = [], vIdx = 0, vShown = false, vRight = 0;
+
+function startReview() {
+  vQueue = vocab.filter(srsDue).slice();
+  vIdx = 0; vShown = false; vRight = 0;
+  if (!vQueue.length) { toast('今天没有要复习的生词'); return; }
+  vMode = 'review';
+  render();
+}
+
+function answerReview(ok) {
+  const v = vQueue[vIdx];
+  if (!v) return;
+  const i = vocab.findIndex(x => x.word === v.word);
+  if (i >= 0) {
+    if (ok) {
+      const n = Math.min((vocab[i].n || 0) + 1, SRS_LADDER.length);
+      vocab[i].n = n;
+      vocab[i].due = addDays(today(), SRS_LADDER[n - 1]);
+    } else {
+      vocab[i].n = 0;
+      vocab[i].due = today();     // 今天还会再出现，直到你记住
+    }
+    LS.set('vocab', vocab);
+  }
+  if (ok) vRight++;
+  vIdx++;
+  vShown = false;
+  if (vIdx >= vQueue.length) {
+    markDay();
+    const left = srsDueCount();
+    toast(left ? ('这轮结束，还有 ' + left + ' 个今天要再来一遍')
+               : ('这轮复习完成，记得 ' + vRight + ' / ' + vQueue.length));
+    vMode = 'list';
+  }
+  render();
+}
+
+function vReviewCard() {
+  const v = vQueue[vIdx];
+  if (!v) { vMode = 'list'; return vVocab(); }
+  return `<div class="card" style="text-align:center">
+    <div class="meta" style="margin-bottom:18px">第 ${vIdx + 1} / ${vQueue.length} 个 · 已记得 ${vRight} 个</div>
+    <div style="font-size:34px;font-weight:500;line-height:1.3">${esc(v.word)}</div>
+    ${v.phon ? `<div style="color:var(--fg2);margin-top:6px">/${esc(v.phon)}/</div>` : ''}
+    ${vShown ? `
+      <div class="exp" style="margin-top:18px;text-align:left">${esc(v.mean || '（这个词没查到释义）')}</div>
+      <div class="row" style="margin-top:18px">
+        <button class="btn" data-vok="1">记得</button>
+        <button class="btn ghost" data-vno="1">忘了</button>
+      </div>`
+    : `
+      <div class="row" style="margin-top:26px"><button class="btn" data-vshow="1">看释义</button></div>
+      <div class="meta" style="margin-top:10px">先在脑子里回想一遍再看答案，记得更牢</div>`}
+  </div>
+  <div class="card tight">
+    <div class="row" style="margin:0"><button class="btn ghost sm" data-vback="1">返回列表</button></div>
+  </div>`;
+}
+
 function vVocab() {
   if (!vocab.length) return `<div class="card"><div class="empty">生词本还是空的。去阅读里点任意一个单词试试。</div>
     <div class="row"><button class="btn" data-go="read">去阅读</button></div></div>`;
+
+  if (vMode === 'review') return vReviewCard();
+
+  const due = srsDueCount();
   return `<div class="card">
     <div class="ttl">生词本</div>
-    <div class="meta">共 ${vocab.length} 个 · 点词时自动查本地四级词库（离线，不联网）</div>
-    <div class="vlist">${vocab.map(v => `<div class="v"><b>${esc(v.word)}</b><span>${esc(v.mean || '待补释义')}</span></div>`).join('')}</div>
-    <div class="row">
-      <button class="btn" data-export="1">导出给 Anki（TSV）</button>
+    <div class="meta">共 ${vocab.length} 个 · 今天待复习 <b>${due}</b> 个
+      ${vocab.length - due ? ' · 已排期 ' + (vocab.length - due) + ' 个' : ''}</div>
+    <div class="row" style="margin:12px 0 2px">
+      ${due ? `<button class="btn" data-vstart="1">开始复习（${due} 个）</button>`
+            : `<button class="btn ghost" disabled>今天没有要复习的</button>`}
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn ghost sm" data-csvexport="1">导出 CSV（通用）</button>
+      <button class="btn ghost sm" data-export="1">导出 Anki（TSV）</button>
       <button class="btn ghost sm" data-clearvocab="1">清空</button>
     </div>
   </div>
   <div class="card tight">
-    <div class="notice">导出后打开 Anki → 文件 → 导入 → 选这个 TSV。字段顺序为
-      <b>单词 / 音标 / 释义 / 来源</b>，导入时对应选好即可。重复导入同一批不会重复建卡（按首个字段去重需自行勾选）。</div>
+    <div class="notice">
+      <b>不用装 Anki 也能背</b>：点「开始复习」，按遗忘曲线的节奏自动排期
+      —— 记得的往后推（1 → 2 → 4 → 7 → 15 → 30 → 60 天），忘了的当天再来一遍。<br>
+      想丢进 Anki 或欧路词典背，用上面两个导出：<b>TSV</b> 给 Anki，
+      <b>CSV</b> 是通用格式（Excel / 欧路 / 不背单词等大多能导入）。
+    </div>
+  </div>
+  <div class="card tight">
+    <div class="vlist">${vocab.map(v => `<div class="v"><b>${esc(v.word)}</b><span>${esc(v.mean || '待补释义')}</span></div>`).join('')}</div>
   </div>`;
 }
 
 function exportTSV() {
   const lines = ['#separator:tab', '#html:false'];
   for (const v of vocab) lines.push([v.word, v.phon || '', v.mean || '', '四级训练台'].join('\t'));
-  const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/tab-separated-values;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'cet4_vocab.tsv';
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  download('\ufeff' + lines.join('\n'), 'cet4_vocab.tsv', 'text/tab-separated-values;charset=utf-8');
+}
+
+/* 通用格式：带 BOM 的 CSV，Excel / 欧路词典 / 不背单词等大多能直接导入 */
+function exportCSV() {
+  const q = s => '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"';
+  const lines = ['word,phonetic,meaning'];
+  for (const v of vocab) lines.push([q(v.word), q(v.phon), q(v.mean)].join(','));
+  download('\ufeff' + lines.join('\r\n'), 'cet4_生词.csv', 'text/csv;charset=utf-8');
 }
 
 /* ---------- 我的 ---------- */
@@ -557,6 +662,7 @@ function vMe() {
 /* ---------- 渲染 ---------- */
 function render() {
   header();
+  if (route !== 'vocab') vMode = 'list';   // 离开生词页就退出复习态
   const v = $('#view');
   if (route === 'read') v.innerHTML = vRead();
   else if (route === 'listen') v.innerHTML = vListen();
@@ -703,6 +809,12 @@ document.addEventListener('click', e => {
 
 /* 生词 / 错题 / 清空 */
 document.addEventListener('click', e => {
+  if (e.target.closest('[data-vstart]')) { startReview(); return; }
+  if (e.target.closest('[data-vshow]')) { vShown = true; render(); return; }
+  if (e.target.closest('[data-vok]')) { answerReview(true); return; }
+  if (e.target.closest('[data-vno]')) { answerReview(false); return; }
+  if (e.target.closest('[data-vback]')) { vMode = 'list'; render(); return; }
+  if (e.target.closest('[data-csvexport]')) { exportCSV(); return; }
   if (e.target.closest('[data-export]')) { exportTSV(); return; }
   if (e.target.closest('[data-clearvocab]')) {
     if (confirm('清空生词本？')) { vocab = []; LS.set('vocab', vocab); render(); } return;
