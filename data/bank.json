@@ -879,7 +879,7 @@
    "items": [
     {
      "id": "write-01",
-     "title": "四级短文写作 · 图书馆应不应该延长开放时间",
+     "title": "短文写作：图书馆应不应该延长开放时间",
      "difficulty": "CET-4",
      "points": [
       "第一段：一句话亮明立场（应该延长）",
@@ -898,7 +898,7 @@
     },
     {
      "id": "write-02",
-     "title": "雅思 Task 2 · 大学学费该不该由学生承担",
+     "title": "议论文：大学学费该不该由学生承担",
      "difficulty": "IELTS 6",
      "points": [
       "第一段：点明争论是什么，不要在这里就下结论",
@@ -925,7 +925,7 @@
    "items": [
     {
      "id": "translate-01",
-     "title": "四级汉译英 · 移动支付",
+     "title": "汉译英：移动支付",
      "difficulty": "CET-4",
      "points": [
       "「迅速普及」可以译成 spread rapidly / become widespread",
@@ -945,7 +945,7 @@
     },
     {
      "id": "translate-02",
-     "title": "考研英译汉 · 关于「注意力」",
+     "title": "英译汉：关于「注意力」",
      "difficulty": "考研",
      "points": [
       "It is tempting to ... 译成「人们很容易……」或「我们很容易把……」",
@@ -972,7 +972,7 @@
    "items": [
     {
      "id": "speak-01",
-     "title": "雅思 Part 2 · 描述一个一开始很难的技能",
+     "title": "话题描述：一个一开始很难的技能",
      "difficulty": "IELTS 6",
      "seconds": 120,
      "points": [
@@ -991,7 +991,7 @@
     },
     {
      "id": "speak-02",
-     "title": "四级口语 · 怎么过周末",
+     "title": "话题陈述：怎么过周末",
      "difficulty": "CET-4",
      "seconds": 60,
      "points": [
