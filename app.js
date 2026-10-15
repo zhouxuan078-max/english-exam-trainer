@@ -10,11 +10,12 @@ const EXAM_STRUCT = '写作 15% · 听力 35% · 阅读 35% · 翻译 15%';
 
 function examInfo() {
   const e = LS.get('exam', null);
-  if (e && e.date) {
-    return { name: e.name || '我的考试', date: e.date, custom: true,
-             note: '你自己设的考试' };
-  }
   const d = (S.bank && S.bank.exam) || {};
+  if (e && e.date) {
+    // 只改日期时，考试名称仍沿用题库自带的（四级）
+    return { name: e.name || d.name || '大学英语四级', date: e.date,
+             note: e.note || d.note || '', custom: true };
+  }
   return { name: d.name || '大学英语四级', date: d.date || '',
            note: d.note || '', site: true };
 }
@@ -42,22 +43,22 @@ function daysToExam() {
   return Math.max(0, Math.ceil((o - Date.now()) / 86400000));
 }
 
-/* 「我的 → 我的考试」：名称 + 日期都能改 */
+/* 「我的 → 我的考试日期」：四级本位，只改日期（6 月场 / 12 月场） */
 function vExamPick() {
   const cur = examInfo();
   const dn = daysToExam();
   return `
-  <div class="sec">我的考试</div>
+  <div class="sec">我的考试日期</div>
   <div class="card tight">
-    <div class="meta">填你要考的考试和日期，首页倒计时按这个算。四级、六级、雅思、托福、高考、考研都能填。</div>
-    <div class="row" style="margin-bottom:8px">
-      <input id="examname" value="${esc(cur.name)}" placeholder="考试名称，如 雅思 / 高考"
-        style="flex:1;min-width:120px;font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
+    <div class="meta">四级一年两场（6 月 / 12 月）。填你报名的那一场，首页倒计时按这个算。
+      具体日期以<b>中国教育考试网</b>公告为准。</div>
+    <div class="row" style="margin:8px 0">
       <input type="date" id="examdate" value="${cur.date}"
         style="font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
       <button class="btn sm" data-examsave="1">保存</button>
+      ${cur.custom ? `<button class="btn ghost sm" data-examreset="1">恢复默认</button>` : ''}
     </div>
-    <div class="meta">当前：<b>${esc(cur.name)}</b>${
+    <div class="meta">当前：<b>${esc(examShort())}</b>${
       cur.date ? ' · ' + cur.date : ' · <span style="color:var(--warn)">还没设日期</span>'}${
       cur.custom ? ' · 你自己设的' : ' · 默认值'}${
       examPassed() ? ' · <span style="color:var(--warn)">这场已经结束了</span>' : ''}${
@@ -380,14 +381,14 @@ function vHome() {
     ${(() => {
       const cur = examInfo(), dn = daysToExam();
       if (dn === null) {
-        return `<div class="ttl">还没设置考试</div>
-          <div class="meta" style="margin:6px 0 0">去「我的 → 我的考试」填一下考试名称和日期，这里就有倒计时了。</div>`;
+        return `<div class="ttl">还没设置考试日期</div>
+          <div class="meta" style="margin:6px 0 0">去「我的 → 我的考试日期」填一下，这里就有倒计时了。</div>`;
       }
       if (examPassed()) {
-        return `<div class="ttl">${esc(cur.name)}（${cur.date}）已经结束了</div>
-          <div class="meta" style="margin:6px 0 0">去「我的 → 我的考试」改成你要考的下一场。</div>`;
+        return `<div class="ttl">${esc(examShort())}（${cur.date}）已经结束了</div>
+          <div class="meta" style="margin:6px 0 0">去「我的 → 我的考试日期」改成你要考的下一场。</div>`;
       }
-      return `<div class="ttl">距 ${esc(cur.name)} 还有 <span style="color:var(--brand)">${dn}</span> 天</div>
+      return `<div class="ttl">距 ${esc(examShort())} 还有 <span style="color:var(--brand)">${dn}</span> 天</div>
         <div class="meta" style="margin:6px 0 0">${cur.date}${cur.site ? ' · ' + EXAM_STRUCT : ''}。</div>`;
     })()}
   </div>
@@ -1192,7 +1193,7 @@ const HELP = {
   me: {
     t: '这一页在说什么',
     items: [
-      '<b>我的考试</b>：考试名称和日期都自己填，首页倒计时按这个算 —— 四级、六级、雅思、托福、高考、考研都行，站本身不限定考试类型。',
+      '<b>我的考试日期</b>：四级一年两场（6 月 / 12 月），填你报名的那一场，首页倒计时跟着变；日期以中国教育考试网公告为准。',
       '<b>我的题目</b>：这个站<b>不带任何版权资料</b>。你自己买的、老师发的资料，导进来只存在你这台设备的浏览器里，不上传、别人看不到。',
       '<b>关于与版权</b>：开源语料取自 Project Gutenberg（公有领域），原创题由作者撰写，<b>不含四级真题</b>。',
       '所有数据（错题 / 生词 / 打卡）都在<b>你自己浏览器本地</b>，清浏览器数据会丢。',
@@ -1422,15 +1423,20 @@ document.addEventListener('click', e => {
     }
     return;
   }
-  /* 我的考试：名称 + 日期都可改（站不限定考试类型） */
+  /* 我的考试日期（四级一年两场，只改日期） */
   if (e.target.closest('[data-examsave]')) {
-    const nmEl = $('#examname'), dtEl = $('#examdate');
-    const nm = ((nmEl && nmEl.value) || '').trim() || '我的考试';
+    const dtEl = $('#examdate');
     const dt = (dtEl && dtEl.value) || '';
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dt)) { toast('请先选一个考试日期'); return; }
-    LS.set('exam', { name: nm, date: dt });
+    LS.set('exam', { date: dt });
     render();
-    toast('已保存：' + nm + ' · ' + dt);
+    toast('已把考试日期设为 ' + dt);
+    return;
+  }
+  if (e.target.closest('[data-examreset]')) {
+    LS.set('exam', null);
+    render();
+    toast('已恢复默认考试日期');
     return;
   }
   if (e.target.closest('[data-clearvocab]')) {
