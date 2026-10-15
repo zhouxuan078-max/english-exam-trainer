@@ -1,5 +1,9 @@
-/* 四级训练台 — 纯前端，无后端，进度存本地 */
+/* 英语备考训练台 — 纯前端，无后端，进度存本地 */
 'use strict';
+
+/* 站名。改名字只改这一处（另外 index.html 的 <title>/<h1> 和
+   构建\tools\build_single_file.py 里的文件名也要跟着改）。 */
+const APP_NAME = '英语备考训练台';
 
 /* ==================== 考试 与 题型 ====================
    QTYPES 是题型登记表：impl 为 true 才是"能出题、能判分"的题型。
@@ -1216,7 +1220,7 @@ function vVocab() {
 
 function exportTSV() {
   const lines = ['#separator:tab', '#html:false'];
-  for (const v of vocab) lines.push([v.word, v.phon || '', v.mean || '', '四级训练台'].join('\t'));
+  for (const v of vocab) lines.push([v.word, v.phon || '', v.mean || '', '英语备考训练台'].join('\t'));
   download('\ufeff' + lines.join('\n'), 'cet4_vocab.tsv', 'text/tab-separated-values;charset=utf-8');
 }
 
@@ -1716,9 +1720,9 @@ function vHelp() {
   </div>`;
 }
 
-/* 首次进来的"选考试"页。也用于从「我的」里回来换考试 ——
-   分两步：先选考试，再确认（方向 + 日期 + 看试卷结构）。
-   底部一定有"出去"的路：误点了、选错了都得能退。 */
+/* 选考试（第一步）：只放「阶段分类 + 考试名」，不加说明文字。
+   点一个考试就进第二步（方向 + 卷面 + 日期）。
+   底部保留"出去"的路：误点了、选错了都得能退。 */
 function vOnboard() {
   const picked = !!LS.get('onboarded', false);
   const ex = onboardExam && EXAMS_BY_ID[onboardExam];
@@ -1730,29 +1734,17 @@ function vOnboard() {
     g.items.push(e);
   });
   return `
-  <div class="card">
-    <div class="ttl">你要考哪一个？</div>
-    <div class="meta">选完进去，界面只出现这个考试需要的题型。
-      ${picked ? '这次是回来换考试的。' : ''}</div>
-  </div>
   ${groups.map(g => `
     <div class="sec">${esc(g.n)}</div>
     <div class="card tight">
-      <div class="row" style="margin:0;gap:6px;flex-wrap:wrap">
+      <div class="row" style="margin:0;gap:7px;flex-wrap:wrap">
         ${g.items.map(e => `<button class="btn ghost sm" data-exam="${e.id}"
-          style="font-size:12px;padding:6px 11px">${esc(e.short || e.name)}</button>`).join('')}
+          style="font-size:13px;padding:9px 13px">${esc(e.short || e.name)}</button>`).join('')}
       </div>
     </div>`).join('')}
   <div class="card tight">
-    <div class="meta">站里<b>不带任何题目</b> —— 选完考试，去「我的 → 我的题目」
-      把自己手上的资料导进来就能刷。这个站<b>不带任何版权内容</b>，题目由使用者自己提供。</div>
-  </div>
-  <div class="card tight">
     <div class="row" style="margin:0">
-      <button class="btn ghost" data-obout="1">${picked ? '← 返回训练台' : '先不选，用四级试试'}</button>
-    </div>
-    <div class="meta" style="margin-top:8px">
-      选错了没关系：进去以后在「我的 → 我的考试」里随时能换，也能再回到这一页。
+      <button class="btn ghost sm" data-obout="1">${picked ? '← 返回' : '跳过，先用四级'}</button>
     </div>
   </div>`;
 }
@@ -1811,8 +1803,8 @@ function vOnboardConfirm(ex, picked) {
 function render() {
   if (onboarding) {
     const picking = onboardStep === 0 || !EXAMS_BY_ID[onboardExam];
-    $('#hdTitle').textContent = '四级训练台';
-    $('#hdSub').textContent = picking ? '先选一下你要考的试' : '确认一下方向、日期和卷面';
+    $('#hdTitle').textContent = APP_NAME;
+    $('#hdSub').textContent = picking ? '选你要考的考试' : '确认方向、日期和卷面';
     $('#hdCount').textContent = '';
     $('#hdClock').textContent = '';
     const hb0 = $('#hdHelp');
@@ -2026,7 +2018,7 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-myexport]')) {
     download(JSON.stringify({
       version: today(), exportedAt: new Date().toISOString(),
-      note: '四级训练台 · 我的题目。在「我的 → 导入我的题目」里粘贴或选这个文件即可。',
+      note: '英语备考训练台 · 我的题目。在「我的 → 导入我的题目」里粘贴或选这个文件即可。',
       types: myBankTypes(),
     }, null, 1), 'cet4_我的题目.json', 'application/json');
     return;
