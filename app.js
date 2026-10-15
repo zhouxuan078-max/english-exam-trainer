@@ -555,14 +555,30 @@ function download(text, name, type) {
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 
+/* 轻提示。
+   ⚠️ 别用 display:none 控制显隐 —— 那样出入场是"啪"地一下，很生硬。
+      现在常驻在 DOM 里，靠 opacity + transform 的 transition 淡入淡出，
+      出场还带一点点上浮，看着自然得多。 */
 function toast(msg) {
   let el = $('#toast');
-  if (!el) { el = document.createElement('div'); el.id = 'toast'; el.className = 'pop'; document.body.appendChild(el); }
-  el.textContent = msg; el.classList.remove('hide');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
   clearTimeout(el._t);
-  // 长提示多留一会儿，否则看不清
-  el._t = setTimeout(() => el.classList.add('hide'),
-                     Math.min(9000, 2200 + msg.length * 60));
+  if (el.classList.contains('on')) {
+    // 已经在显示中：先退场再进场，让"换了条提示"也能看出来
+    el.classList.remove('on');
+    el._t = setTimeout(() => el.classList.add('on'), 160);
+  } else {
+    // 强制重排，保证连续两次调用也能重新播动画
+    void el.offsetWidth;
+    el.classList.add('on');
+  }
+  el._t2 = setTimeout(() => el.classList.remove('on'),
+                      Math.min(9000, 2200 + String(msg).length * 60));
 }
 
 /* ---------- 词形还原 / 查词 ----------
