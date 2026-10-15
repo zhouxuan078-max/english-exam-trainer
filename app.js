@@ -1575,6 +1575,16 @@ function vMe() {
         <code>=== 仔细阅读 ===</code> <code>=== 长篇匹配 ===</code><br>
         <code>=== 选词填空 ===</code> <code>=== 听力 ===</code>
       </div>
+      <div class="meta" style="margin-top:2px">
+        能导的就这四类（＝本站已经搭好的题型）。${(() => {
+          const ei = examInfo();
+          const miss = ei.types.filter(t => !(QTYPES[t] || {}).impl);
+          if (!miss.length) return '';
+          return `你要考的 <b>${esc(ei.short)}</b> 里还有 <b>${miss.length}</b> 种题型在做（${
+            miss.map(t => esc((QTYPES[t] || {}).name || t)).join(' / ')}），
+            那几种现在导进来也刷不了，先放着。`;
+        })()}
+      </div>
       <div style="margin:8px 0">
         <input type="file" id="myfile" accept=".txt,.json" style="font-size:12px">
       </div>
