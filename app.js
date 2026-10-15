@@ -252,16 +252,32 @@ const EXAMS = [
     ] },
 ];
 
+/* ---------- 每场考试**自己的**配置：方向 + 考试日期 ----------
+   ⚠️ 别把方向/日期塞进"当前看的是哪一场"那个槽位（键 `exam`）——
+      那样一换考试就被清掉：同时备考四级(6 月)和雅思(8 月)的人，
+      来回切一次，另一个的日期和方向就全没了。
+      所以：`exam` 只记"现在看哪一场"，方向/日期按考试各存一份。 */
+function cfgKey(id) { return 'examcfg:' + id; }
+function getCfg(id) { return LS.get(cfgKey(id), null) || {}; }
+function setCfg(id, patch) {
+  const rec = Object.assign({}, getCfg(id), patch);
+  Object.keys(rec).forEach(k => {
+    if (rec[k] === null || rec[k] === undefined || rec[k] === '') delete rec[k];
+  });
+  LS.set(cfgKey(id), rec);
+  return rec;
+}
+
 /* 有方向的考试：拿到"当前生效的方向"。
    ⚠️ vid 参数很关键 —— 确认页上方向还没落盘（存在 onboardVariant 里），
-      只看 localStorage 的话，页面上选什么都读不到，表格永远显示基础卷面。
-      踩过：考研英语一/二点了没区别，就是因为这里只认 localStorage。 */
+      只看本地存储的话，页面上选什么都读不到，表格永远显示基础卷面。
+      踩过：考研英语一/二点了没区别，就是因为这里只认存储里的值。 */
 function variantFor(ex, vid) {
   ex = ex || curExam();
   if (vid) return (ex.variants || []).find(v => v.id === vid) || null;
-  const sel = LS.get('exam', null) || {};
-  if (sel.id !== ex.id || !sel.variant) return null;
-  return (ex.variants || []).find(v => v.id === sel.variant) || null;
+  const cur = getCfg(ex.id).variant;
+  if (!cur) return null;
+  return (ex.variants || []).find(v => v.id === cur) || null;
 }
 function curVariant(ex) { return variantFor(ex, null); }
 
@@ -394,31 +410,50 @@ function curExam() {
   return EXAMS_BY_ID[DEFAULT_EXAM_ID];
 }
 
-/* 写考试选择 —— 一律在现有选择上**合并**，避免"改个日期把方向弄丢"这类 bug。
-   要整体换考试就用 LS.set('exam', {id}) 直接覆盖。 */
+/* 写考试选择。
+   patch.id  = 换到哪一场（只改"现在看的是哪一场"，不动别场的东西）
+   patch.variant / patch.date = 这一场**自己的**方向 / 日期
+   同一场考试的日期和方向互不干扰（踩过：改个日期把方向弄丢）。 */
 function setExam(patch) {
-  const old = LS.get('exam', null) || {};
-  const switching = patch.id && old.id && patch.id !== old.id;
-  // 换考试：日期作废，但同一个 patch 里带的方向要留下
-  const rec = switching ? { id: patch.id, variant: patch.variant }
-                        : Object.assign({}, old, patch);
-  Object.keys(rec).forEach(k => {
-    if (rec[k] === null || rec[k] === undefined || rec[k] === '') delete rec[k];
-  });
-  LS.set('exam', rec);
-  return rec;
+  patch = patch || {};
+  const id = patch.id || (LS.get('exam', null) || {}).id || DEFAULT_EXAM_ID;
+  LS.set('exam', { id });
+  const cfg = {};
+  if ('variant' in patch) cfg.variant = patch.variant;
+  if ('date' in patch) cfg.date = patch.date;
+  if (Object.keys(cfg).length) setCfg(id, cfg);
+  return Object.assign({ id }, getCfg(id));
+}
+
+/* 老版本把方向 / 日期和历史选的考试挤在同一个槽位里；「我的题目」也只有一份、
+   所有考试共用。这里一次性搬到"每场考试各一份"的新位置，避免老用户升级后
+   日期凭空消失、导入的题目乱串（搬完就把旧字段摘掉，之后只走新键）。 */
+function migrateExamCfg() {
+  const old = LS.get('exam', null);
+  if (old && old.id) {
+    if (old.variant || old.date) {
+      setCfg(old.id, { variant: old.variant, date: old.date });
+      LS.set('exam', { id: old.id });
+    }
+  }
+  const my = LS.get('mybank', null);
+  if (my && Array.isArray(my.types) && my.types.length) {
+    const id = (old && old.id && EXAMS_BY_ID[old.id]) ? old.id : DEFAULT_EXAM_ID;
+    if (!LS.get('mybank:' + id, null)) LS.set('mybank:' + id, my);
+    LS.set('mybank', null);
+  }
 }
 
 /* 当前考试信息。日期：使用者填过就用他填的，否则用考试自带的（可能为空）。
    types / paper / total 都从试卷结构派生，不单独维护。 */
 function examInfo() {
   const ex = curExam();
-  const sel = LS.get('exam', null) || {};
-  const custom = !!(sel.id === ex.id && sel.date);
+  const cfg = getCfg(ex.id);
+  const custom = !!cfg.date;
   const v = curVariant(ex);
   return {
     id: ex.id, name: ex.name, short: ex.short || ex.name,
-    date: custom ? sel.date : (ex.date || ''),
+    date: custom ? cfg.date : (ex.date || ''),
     types: typesOf(ex), paper: paperOf(ex),
     q: qOf(ex), full: fullOf(ex),
     variants: ex.variants || [], variant: v ? v.id : null,
@@ -537,13 +572,97 @@ let wrong = [];
 let marks = {};
 function scopeKeys() {
   const id = curExam().id;
-  return { stats: 'stats:' + id, wrong: 'wrong:' + id, marks: 'marks:' + id };
+  return { stats: 'stats:' + id, wrong: 'wrong:' + id, marks: 'marks:' + id,
+           prog: 'prog:' + id };
 }
+let scopedFor = null;      // 当前内存里这几样是给哪场考试装的
+/* ⚠️ 自愈：只要发现当前考试和内存里装的那套不一致，就重新装一遍。
+   为什么需要它 —— 换考试有好几条路径（「我的」页点击、方向切换、首次选完），
+   任何一条忘了调 loadExamScoped() 都会出现"上一场的数据串过来"。
+   挂在 render() 上就不可能漏。 */
+function ensureExamScoped() {
+  const id = curExam().id;
+  if (scopedFor === id) return;
+  loadExamScoped();
+  rebuildBank();             // 我导入的题目也按考试重筛
+  importReport = null;       // 上一场考试的导入报告别跟过来
+  scopedFor = id;
+}
+
 function loadExamScoped() {
   const k = scopeKeys();
   stats = LS.get(k.stats, { ans: 0, right: 0 }) || { ans: 0, right: 0 };
   wrong = LS.get(k.wrong, []) || [];
   marks = LS.get(k.marks, {}) || {};
+  prog = LS.get(k.prog, {}) || {};
+}
+
+/* ---------- 练习范围：整套卷子 / 我的题目 ----------
+   只导入了一部分题目时，按"整套卷子"算进度会很难看：四级卷面几十题，
+   用户只导了 5 篇，那条进度条永远停在个位数，看着像坏了。
+   所以给一个开关：
+     paper 整套卷子：题库 = 站内自带 + 我的题目；进度和折算分都按卷面来
+     mine  我的题目：题库 = **只有我导入的**；进度按"导了多少 / 做了多少"，
+                     只报答对几题 —— 练习题本来就没有卷面权重，硬折算分是假的
+   按考试各存一份：四级用我的题练，不该改掉六级的整套卷子口径。 */
+function scopeKey() { return 'scope:' + curExam().id; }
+function curScope() { return LS.get(scopeKey(), 'paper') === 'mine' ? 'mine' : 'paper'; }
+function setScope(v) {
+  LS.set(scopeKey(), v === 'mine' ? 'mine' : 'paper');
+  rebuildBank();
+  render();
+}
+
+/* 当前范围里"值得列出来"的题型。
+   paper 模式照常列全（没题的进去会看到导入引导，这是原来就有的行为）；
+   mine 模式只列我真导了题的 —— 别的点进去只会是空的。 */
+function activeTypes() {
+  const all = typesOf(curExam());
+  if (curScope() !== 'mine') return all;
+  return all.filter(t => {
+    if (t === 'listen') return listenCountNow() > 0;
+    const bt = S.bank && S.bank.types.find(x => x.type === t);
+    return !!(bt && bt.items.length);
+  });
+}
+/* 当前题库里这个题型有多少条（listen 不在 bank.types 里，走 S.listen） */
+function typeCountNow(t) {
+  if (t === 'listen') return listenCountNow();
+  const bt = S.bank && S.bank.types.find(x => x.type === t);
+  return bt ? bt.items.length : 0;
+}
+function listenCountNow() {
+  return (S.listen && S.listen.items) ? S.listen.items.length : 0;
+}
+/* 听写题的作答记录键是 lc:<考试>:<题目id>，不走 ans: —— 别忘了算进进度 */
+function listenDoneCount() { return LS.keys('lc:' + curExam().id + ':').length; }
+function scopeDoneCount(t) {
+  return t === 'listen' ? listenDoneCount() : doneCountOf(t);
+}
+
+/* 「这套卷子的进度」：分母跟着练习范围走。 */
+function scopeProgress() {
+  const types = activeTypes();
+  let total = 0, done = 0;
+  types.forEach(t => {
+    total += typeCountNow(t);
+    done += scopeDoneCount(t);
+  });
+  const pct = total ? Math.round(done / total * 100) : 0;
+  // 统分：每个题型"答对几小题 × 官方每题分值"，加起来 —— 分值从这场考试的卷面来，
+  // 所以这就是官方那套算法。练习题（mine 模式）不折算，只报答对几题。
+  let got = 0, scorable = 0, right = 0;
+  types.forEach(t => {
+    const bt = S.bank && S.bank.types.find(x => x.type === t);
+    if (!bt) return;
+    right += correctCountOf(bt);
+    const per = scorePerQOf(t);
+    if (!per) return;
+    scorable++;
+    got += correctCountOf(bt) * per;
+  });
+  return { types, total, done, pct, got, scorable, right,
+           all: total > 0 && done >= total, mine: curScope() === 'mine' };
 }
 
 /* 某个题型已经做了多少条（提交过的条目才会留下 ans:<题型>:<序号>） */
@@ -558,7 +677,7 @@ function doneCountOf(typeId) {
 }
 let vocab = LS.get('vocab', []);
 let days = LS.get('days', []);
-let prog = LS.get('prog', {});          // type -> 当前第几篇
+let prog = {};                          // type -> 当前第几篇（按考试存，见 loadExamScoped）
 
 const $ = s => document.querySelector(s);
 const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -964,7 +1083,7 @@ const TYPE_DESC = {
 
 function navItems() {
   const items = [{ k: 'home', ic: '🏠', n: '首页' }];
-  examInfo().types.forEach(t => {
+  activeTypes().forEach(t => {
     items.push({ k: 'type:' + t, ic: NAV_TYPE_ICON[t] || '📘',
                  n: (QTYPES[t] || {}).name || t });
   });
@@ -1058,11 +1177,9 @@ function vHome() {
 
   <div class="sec">这个考试要练什么</div>
   <div class="entry">
-    ${examInfo().types.map(t => {
+    ${activeTypes().map(t => {
       const q = QTYPES[t] || {};
-      const bt = S.bank && S.bank.types.find(x => x.type === t);
-      const n = bt ? bt.items.length
-        : (t === 'listen' && S.listen ? S.listen.items.length : 0);
+      const n = typeCountNow(t);
       const d = n ? (n + ' ' + (q.unit || '篇')) : '还没有题目';
       return `<a href="#type:${t}" data-go="type:${t}">
         <div class="n">${NAV_TYPE_ICON[t] || '📘'} ${esc(q.name || t)}</div>
@@ -1072,36 +1189,30 @@ function vHome() {
     <a href="#me" data-go="me"><div class="n">📊 我的</div><div class="d">错题 ${wrong.length} 条</div></a>
   </div>
 
-  <div class="sec">这套卷子的进度</div>
+  <div class="sec">${scopeProgress().mine ? '我的题目的进度' : '这套卷子的进度'}</div>
   <div class="card tight">
+    <div class="row" style="margin:0 0 10px;gap:6px">
+      <button class="btn ${curScope() === 'paper' ? '' : 'ghost'} sm" data-scope="paper">整套卷子</button>
+      <button class="btn ${curScope() === 'mine' ? '' : 'ghost'} sm" data-scope="mine">我的题目</button>
+    </div>
     ${(() => {
-      const types = examInfo().types;
-      const total = types.reduce((a, t) => {
-        const bt = S.bank && S.bank.types.find(x => x.type === t);
-        return a + (bt ? bt.items.length
-          : (t === 'listen' && S.listen ? S.listen.items.length : 0));
-      }, 0);
-      const done = types.reduce((a, t) => a + doneCountOf(t), 0);
-      const pct = total ? Math.round(done / total * 100) : 0;
+      const p = scopeProgress();
+      if (!p.total) {
+        return `<div class="empty">这个范围里还没有题目。${
+          curScope() === 'mine' ? '去「我的」导入你的题目。' : ''}</div>`;
+      }
       // 统分：每个题型"答对几小题 × 官方每题分值"，加起来
-      // —— 分值从这场考试的卷面来（四级仔细阅读 142÷10 = 14.2），所以是官方那套算法
-      let got = 0, scorable = 0;
-      types.forEach(t => {
-        const per = scorePerQOf(t);
-        const bt = S.bank && S.bank.types.find(x => x.type === t);
-        if (!per || !bt) return;
-        scorable++;
-        got += correctCountOf(bt) * per;
-      });
-      const all = total > 0 && done >= total;
-      const scoreTxt = scorable === 0 ? ''
-        : (all
-          ? `折算总分 <b>${(+got.toFixed(1))}</b> 分`
-          : `已得 <b>${(+got.toFixed(1))}</b> 分`);
-      return `<div class="pbar"><i style="width:${pct}%"></i></div>
+      // —— 分值从这场考试的卷面来（四级仔细阅读 142÷10 = 14.2），所以是官方那套算法。
+      // mine 模式**不折算**：练习题本来就没有卷面权重，硬折出来是假的。
+      const scoreTxt = p.mine
+        ? `答对 <b>${p.right}</b> 题`
+        : (p.scorable === 0 ? ''
+          : (p.all ? `折算总分 <b>${(+p.got.toFixed(1))}</b> 分`
+                   : `已得 <b>${(+p.got.toFixed(1))}</b> 分`));
+      return `<div class="pbar"><i style="width:${p.pct}%"></i></div>
         <div class="meta" style="margin:9px 0 0">
-          已做 <b>${done}</b> / ${total} 项 · <b>${pct}%</b>${
-            all ? '（这套卷子做完了）' : ''}</div>
+          已做 <b>${p.done}</b> / ${p.total} 项 · <b>${p.pct}%</b>${
+            p.all ? (p.mine ? '（我的题目都做完了）' : '（这套卷子做完了）') : ''}</div>
         ${scoreTxt ? `<div class="meta" style="margin-top:4px">${scoreTxt}</div>` : ''}`;
     })()}
   </div>
@@ -1109,13 +1220,10 @@ function vHome() {
   <div class="sec">各题型做了多少</div>
   <div class="card tight">
     <div class="vlist">
-      ${examInfo().types.map(t => {
+      ${activeTypes().map(t => {
         const q = QTYPES[t] || {};
-        const bt = S.bank && S.bank.types.find(x => x.type === t);
-        const total = bt ? bt.items.length
-          : (t === 'listen' && S.listen ? S.listen.items.length : 0);
         // 累计就是"做了多少"，**不带分母** —— 上限是"这套卷子的进度"那块的事。
-        const dn = doneCountOf(t);
+        const dn = scopeDoneCount(t);
         return `<div class="v">
           <span>${NAV_TYPE_ICON[t] || '📘'} ${esc(q.name || t)}</span>
           <b${dn ? '' : ' style="color:var(--fg3)"'}>${dn} ${esc(q.unit || '篇')}</b>
@@ -1128,7 +1236,7 @@ function vHome() {
 
 /* ---------- 阅读 ---------- */
 function stateOf(type) { return prog[type] || 0; }
-function setState(type, i) { prog[type] = i; LS.set('prog', prog); }
+function setState(type, i) { prog[type] = i; LS.set(scopeKeys().prog, prog); }
 
 /* ---------- 题型页 ----------
    路由是 type:<题型id>。已实现的渲染题目；没实现的给一个说明页。 */
@@ -1142,11 +1250,14 @@ function vTypePage(id) {
 
 function vTypeEmpty(id) {
   const q = QTYPES[id] || {};
+  const mine = curScope() === 'mine';
   return `<div class="card">
     <div class="ttl">${esc(q.name || id)}</div>
     <div class="meta" style="margin-top:6px">${esc(TYPE_DESC[id] || '')}</div>
-    <div class="empty">这个题型还没有题目。</div>
-    <div class="row"><button class="btn" data-go="me">去「我的题目」导入</button></div>
+    <div class="empty">${mine ? '「我的题目」里还没有这一类的题。' : '这个题型还没有题目。'}</div>
+    <div class="row">${mine
+      ? '<button class="btn" data-scope="paper">改回整套卷子</button>'
+      : '<button class="btn" data-go="me">去「我的题目」导入</button>'}</div>
   </div>`;
 }
 
@@ -1410,8 +1521,7 @@ function resultRow(t, i, total, done, d) {
     }
     return `<div class="result">
       <span class="score">已提交 · ${isTr ? cc(txt) + ' 字' : wc(txt) + ' 词'}</span>
-      <button class="btn ghost sm" data-next="1">下一篇 →</button>
-      <button class="btn ghost sm" data-reset="1">重做</button></div>`;
+      <button class="btn ghost sm" data-reset="1">重做</button></div>${pagerRow(t, i)}`;
   }
   if (!done) {
     const n = Object.keys(d.a || {}).length + Object.keys(d.p || {}).length;
@@ -1435,8 +1545,7 @@ function resultRow(t, i, total, done, d) {
     : (t.type === 'quant' || t.type === 'single' ? '' : '');
   return `<div class="result">
     <span class="score">答对 <b>${right}/${total}</b>${tail}</span>
-    <button class="btn ghost sm" data-next="1">下一篇 →</button>
-    <button class="btn ghost sm" data-reset="1">重做</button></div>`;
+    <button class="btn ghost sm" data-reset="1">重做</button></div>${pagerRow(t, i)}`;
 }
 
 let draft = null;   // 当前作答草稿
@@ -1468,7 +1577,8 @@ function vListen() {
   if (!S.listen || !S.listen.items.length) return `<div class="card"><div class="empty">听力语料未加载</div></div>`;
   li = Math.min(li, S.listen.items.length - 1);
   const it = S.listen.items[li];
-  const st = LS.get('lc:' + it.id, null);
+  // 听力听写的作答也按考试存：换考试不该带着上一场写过的句子
+  const st = LS.get('lc:' + curExam().id + ':' + it.id, null);
   const rates = [0.7, 0.85, 1.0];
   return `
   <div class="card audio-card">
@@ -1619,8 +1729,9 @@ function exportCSV() {
      2. JSON 格式（本站"导出我的题目"产出的文件）—— 方便同学之间互传
    ---------------------------------------------------------- */
 
-const MYFORMAT_DEMO = `（格式示例，照这个写就行。分节标题决定它归到哪一类，
-  只用这四种标题：仔细阅读 / 长篇匹配 / 选词填空 / 听力）
+const MYFORMAT_DEMO = `（格式示例。分节标题决定它归到哪一类，用 === 标题 === 包起来，
+一行一个。认得的标题：仔细阅读 / 长篇匹配 / 选词填空 / 单项选择 / 判断题 /
+听力理解 / 听力听写 / 数学 / 填空题 / 写作 / 翻译 / 口语）
 
 === 仔细阅读 ===
 TITLE: 我的练习 · 仔细阅读
@@ -1641,7 +1752,6 @@ B. Reading aloud for an hour.
 C. A short walk before study.
 D. Listening to music while reading.
 ANSWER: C
-EXPLAIN: 第二段第一句直接说了。
 
 === 选词填空 ===
 TITLE: 我的练习 · 选词填空
@@ -1660,15 +1770,36 @@ STATEMENTS:
 - Adults think they have missed the best period for learning. | A
 - Finding regular time to study is the biggest obstacle. | C
 
-=== 听力 ===
-TITLE: 我的练习 · 听力听写
-- Many adults begin a new language believing that the best years have passed.
-- The biggest difficulty for most adult learners is not ability but time.`;
+=== 听力理解 ===
+TITLE: 我的练习 · 听力理解
+SCRIPT:
+This is a recorded announcement from the university library. Starting next Monday, the main reading room will stay open until midnight.
+Q: How late will the reading room stay open?
+A. Until eight in the evening.
+B. Until ten in the evening.
+C. Until midnight.
+D. Until eleven.
+ANSWER: C
 
+=== 写作 ===
+TITLE: 我的练习 · 写作
+MATERIAL: 图书馆应不应该延长开放时间？
+POINTS:
+- 第一段：一句话亮明立场
+- 第二段：理由一 —— 现实需求（白天有课，晚上没地方自习）
+SAMPLE:
+Should the library stay open longer during the exam period? I believe it should.`;
+
+/* 「我的题目」按考试分开存。
+   ⚠️ 用户说过"这些考试都应该有自己独立的东西" —— 在四级里导入的阅读材料，
+      切到六级就不该出现（题型要求、难度、卷面权重都不是一回事）。
+      而且不分开的话，导入的内容会把**每个考试**的题库都往前挤，记录全错位。 */
+function myBankKey() { return 'mybank:' + curExam().id; }
 function myBankTypes() {
-  const my = LS.get('mybank', null);
+  const my = LS.get(myBankKey(), null);
   return (my && Array.isArray(my.types)) ? my.types : [];
 }
+
 /* 阅读类条数（不含听力，听力按"句"算） */
 function myBankCount() {
   return myBankTypes().filter(t => t.type !== 'listen')
@@ -1681,46 +1812,56 @@ function myListenCount() {
 
 /* --- 文本格式解析 --- */
 
-function _splitSections(text) {
-  const raw = String(text || '').replace(/\r\n?/g, '\n');
-  const blocks = [];
-  let cur = null;
-  for (const line of raw.split('\n')) {
-    const m = line.match(/^\s*={2,}\s*(.+?)\s*={2,}\s*$/);
-    if (m) { cur = { name: m[1].trim(), lines: [] }; blocks.push(cur); continue; }
-    if (cur) cur.lines.push(line);
+/* 判断"这一行是不是一个光秃秃的分节标题"，是就返回归一化后的标题名。
+   Word 试卷里几乎不会有人写 === 听力理解 ===，多半就是一行
+   「听力理解」或者「Part I  Reading Comprehension」。
+   ⚠️ 判宽了会把正文句子也当标题（"Reading is important." 就把正文切两半），
+      所以下面这几道闸门一个都不能少：
+        有冒号/竖线 → 多半是 TITLE: / PASSAGE: / 匹配题的 | A，排除
+        有句读（. 。 , ， ? ！ ; ）→ 是句子，排除
+        英文字超过 3 个词 → 是句子，排除
+        英文词不是标题式大写（Reading is important 有 is）→ 排除
+        剩下的还得能被题型表命中 */
+function bareSectionName(line) {
+  let s = String(line || '').trim();
+  if (!s || s.length > 60) return null;
+  if (/[:：|]/.test(s)) return null;
+  s = s.replace(/^(?:part|section|第)\s*[IVXivx一二三四五六七八九十\d]+\s*[部分节]?\s*[.、]?\s*/i, '');
+  s = s.replace(/[（(][^）)]{0,30}[）)]\s*$/, '').trim();
+  if (!s || s.length > 26) return null;
+  if (/[.。,，?？!！;；]/.test(s)) return null;
+  if (/[A-Za-z]/.test(s)) {
+    const words = s.split(/\s+/).filter(Boolean);
+    if (words.length > 3) return null;
+    if (!words.every(w => /^[A-Z0-9]/.test(w))) return null;
   }
-  return blocks;
+  return sectionTypeOf(s) ? s : null;
 }
 
-function _parseCareful(lines) {
-  let title = '';
-  const paras = [], questions = [];
-  let buf = [], q = null;
-  const flush = () => { const s = buf.join('\n').trim(); if (s) paras.push(s); buf = []; };
-  const closeQ = () => { if (q && q.q) questions.push(q); q = null; };
-  for (const raw of lines) {
-    const t = raw.trim();
-    if (!t) { if (!q) flush(); continue; }
-    let m;
-    if ((m = t.match(/^TITLE\s*[:：]\s*(.*)$/i))) { title = m[1].trim(); continue; }
-    if ((m = t.match(/^PASSAGE\s*[:：]\s*(.*)$/i))) { flush(); if (m[1].trim()) buf.push(m[1].trim()); continue; }
-    if ((m = t.match(/^Q\s*[:：]\s*(.*)$/i))) { closeQ(); flush(); q = { q: m[1].trim(), options: [], answer: 0, explain: '' }; continue; }
-    if ((m = t.match(/^([A-Da-d])\s*[.．、:：]\s*(.*)$/))) {
-      if (q) q.options.push(m[2].trim());
-      continue;
-    }
-    if ((m = t.match(/^ANSWER\s*[:：]\s*([A-Da-d])/i))) {
-      if (q) q.answer = m[1].toUpperCase().charCodeAt(0) - 65;
-      continue;
-    }
-    if ((m = t.match(/^EXPLAIN\s*[:：]\s*(.*)$/i))) { if (q) q.explain = m[1].trim(); continue; }
-    if (q) { if (q.explain) q.explain += t; else if (!q.options.length) q.q += t; }
-    else buf.push(t);
+function _splitSections(text) {
+  const raw = String(text || '').replace(/\r\n?/g, '\n');
+  const lines = raw.split('\n');
+  const blocks = [];
+  let cur = null;
+  for (const line of lines) {
+    let name = null;
+    const m = line.match(/^\s*={2,}\s*(.+?)\s*={2,}\s*$/);
+    if (m) name = m[1].trim();
+    else name = bareSectionName(line);
+    if (name) { cur = { name: name, lines: [] }; blocks.push(cur); continue; }
+    if (cur) cur.lines.push(line);
   }
-  closeQ(); flush();
-  if (!questions.length) return null;
-  return { title: title || '我的仔细阅读', passage: paras, questions };
+  /* 第一个标题之前如果还有正文，也当一块 —— 交给自动判型，
+     不然开头那一段会被静悄悄丢掉。 */
+  if (blocks.length) {
+    const head = [];
+    for (const line of lines) {
+      if (/^\s*={2,}\s*(.+?)\s*={2,}\s*$/.test(line) || bareSectionName(line)) break;
+      head.push(line);
+    }
+    if (head.join('').trim().length > 20) blocks.unshift({ name: '', lines: head });
+  }
+  return blocks;
 }
 
 function _parseCloze(lines) {
@@ -1792,39 +1933,647 @@ function _parseListen(lines) {
   return out.length ? out : null;
 }
 
-function parseMyBankText(text) {
-  const out = { careful: [], matching: [], cloze: [], listen: [] };
-  const unknown = [];
-  let seq = 0;
-  for (const b of _splitSections(text)) {
-    const nm = b.name;
-    let item = null, type = null;
-    if (/选词|cloze/i.test(nm)) { item = _parseCloze(b.lines); type = 'cloze'; }
-    else if (/匹配|matching/i.test(nm)) { item = _parseMatching(b.lines); type = 'matching'; }
-    else if (/听|listen/i.test(nm)) { item = _parseListen(b.lines); type = 'listen'; }
-    else if (/阅读|careful|reading/i.test(nm)) { item = _parseCareful(b.lines); type = 'careful'; }
-    if (!item) { unknown.push(nm); continue; }
-    if (type === 'listen') {
-      for (const t of item) {
-        seq++;
-        out.listen.push({ id: 'mine-listen-' + seq, text: t, origin: 'mine' });
-      }
-      continue;
-    }
-    seq++;
-    item.id = 'mine-' + type + '-' + seq;
-    item.origin = 'mine';
-    out[type].push(item);
+/* 分节标题 → 题型。
+   ⚠️ 顺序**就是**优先级，先特殊后一般：「听力听写」必须排在「听力」前面，
+      否则 "=== 听力听写 ===" 会被 /听力/ 吃掉，变成听力选择题（踩过）。 */
+const SEC_RULES = [
+  [/听写|dictation/i, 'listen'],
+  [/长篇匹配|信息匹配|段落匹配|匹配|matching/i, 'matching'],
+  [/选词填空|banked\s*cloze|cloze/i, 'cloze'],
+  [/仔细阅读|传统阅读|阅读理解|阅读|careful|reading/i, 'careful'],
+  [/单项选择|单选|single\s*choice/i, 'single'],
+  [/判断|正误|true\s*\/?\s*false|judge/i, 'judge'],
+  [/听力|listening/i, 'listening'],
+  [/数量推理|定量|数学|quant/i, 'quant'],
+  [/填空|gap|fill/i, 'gap'],
+  [/写作|作文|writing|essay/i, 'write'],
+  [/翻译|translation/i, 'translate'],
+  [/口语|朗读|speaking|oral/i, 'speak'],
+];
+function sectionTypeOf(name) {
+  const s = String(name || '');
+  for (let i = 0; i < SEC_RULES.length; i++) {
+    if (SEC_RULES[i][0].test(s)) return SEC_RULES[i][1];
   }
-  return { out, unknown };
+  return null;
 }
 
-const MY_TYPE_META = {
-  careful: { name: '仔细阅读', score: 14.2, unit: '篇' },
-  matching: { name: '长篇匹配', score: 7.1, unit: '篇' },
-  cloze: { name: '选词填空', score: 3.55, unit: '篇' },
-  listen: { name: '听力听写', score: 0, unit: '句' },
-};
+/* 一个分节标题都没写时，按内容猜这是哪种题。
+   ⚠️ 猜完要**告诉用户**"我把它当成了 X" —— 闷声猜错比不猜还糟。 */
+function guessImportType(lines) {
+  const txt = lines.join('\n');
+  const has = re => re.test(txt);
+  if (has(/^PARAGRAPHS?\s*[:：]/im) && has(/^STATEMENTS?\s*[:：]/im)) return 'matching';
+  if (has(/^OPTIONS?\s*[:：]/im) && has(/^ANSWERS?\s*[:：]/im)) return 'cloze';
+  if (has(/^SCRIPT\s*[:：]/im)) return 'listening';
+  if (has(/^MATERIAL\s*[:：]/im) || has(/^PROMPT\s*[:：]/im)) {
+    return has(/^REFERENCE\s*[:：]/im) ? 'translate' : 'write';
+  }
+  if (has(/^Q\s*[:：]/im)) return has(/^PASSAGE\s*[:：]/im) ? 'careful' : 'single';
+  if (has(/\{\{\d+\}\}/) || has(/_{3,}/)) return 'gap';
+  if (has(/^[-*•]\s+[A-Za-z]/m)) return 'listen';
+  return null;
+}
+
+/* 开放式作答（写 / 译 / 说）：MATERIAL 是题目要求，POINTS 是打分要点，
+   SAMPLE / REFERENCE 是参考答案。 */
+function _parseOpen(lines) {
+  let title = '', material = '', sample = '', reference = '';
+  let seconds = 0, mode = '';
+  const points = [], buf = [];
+  for (const raw of lines) {
+    const t = raw.trim();
+    let m;
+    if (!t) { if (mode === 'm') buf.push(''); continue; }
+    if ((m = t.match(/^TITLE\s*[:：]\s*(.*)$/i))) { title = m[1].trim(); continue; }
+    if ((m = t.match(/^MATERIAL\s*[:：]\s*(.*)$/i))) { mode = 'm'; if (m[1].trim()) buf.push(m[1].trim()); continue; }
+    if ((m = t.match(/^POINTS?\s*[:：]\s*(.*)$/i))) { mode = 'p'; if (m[1].trim()) points.push(m[1].trim()); continue; }
+    if ((m = t.match(/^SAMPLE\s*[:：]\s*(.*)$/i))) { mode = 's'; sample = m[1].trim(); continue; }
+    if ((m = t.match(/^REFERENCE\s*[:：]\s*(.*)$/i))) { mode = 'r'; reference = m[1].trim(); continue; }
+    if ((m = t.match(/^SECONDS?\s*[:：]\s*(\d+)/i))) { seconds = +m[1]; continue; }
+    if (mode === 'p') points.push(t.replace(/^[-*•]\s*/, ''));
+    else if (mode === 's') sample += (sample ? '\n' : '') + t;
+    else if (mode === 'r') reference += (reference ? '\n' : '') + t;
+    else buf.push(t);
+  }
+  material = buf.join('\n').trim();
+  if (!material) return null;
+  const it = { title: title || '我的题目', material, points };
+  if (sample) it.sample = sample;
+  if (reference) it.reference = reference;
+  if (seconds) it.seconds = seconds;
+  return it;
+}
+
+/* 通用「材料 + 若干带选项的小题」：仔细阅读 / 单项选择 / 判断 / 听力理解 / 数量推理
+   全用这一个解析器，靠**有没有 PASSAGE / SCRIPT** 区分。 */
+function _parseChoice(lines) {
+  let title = '', script = '';
+  const paras = [], questions = [];
+  let buf = [], q = null, mode = '';
+  const flush = () => { const s = buf.join('\n').trim(); if (s) paras.push(s); buf = []; };
+  const closeQ = () => { if (q && q.q) questions.push(q); q = null; };
+  for (const raw of lines) {
+    const t = raw.trim();
+    if (!t) { if (!q && mode !== 's') flush(); else if (mode === 's') script += '\n'; continue; }
+    let m;
+    if ((m = t.match(/^TITLE\s*[:：]\s*(.*)$/i))) { title = m[1].trim(); mode = ''; continue; }
+    if ((m = t.match(/^(PASSAGE|TEXT)\s*[:：]\s*(.*)$/i))) {
+      flush(); mode = ''; if (m[2].trim()) buf.push(m[2].trim()); continue;
+    }
+    if ((m = t.match(/^SCRIPT\s*[:：]\s*(.*)$/i))) { closeQ(); flush(); mode = 's'; script = m[1].trim(); continue; }
+    if ((m = t.match(/^Q\s*[:：]\s*(.*)$/i))) {
+      closeQ(); flush(); mode = '';
+      q = { q: m[1].trim(), options: [], answer: -1, explain: '' }; continue;
+    }
+    if ((m = t.match(/^([A-Da-d])\s*[.．、:：]\s*(.*)$/))) {
+      if (q) q.options.push(m[2].trim()); continue;
+    }
+    if ((m = t.match(/^ANSWER\s*[:：]\s*([A-Da-d])/i))) {
+      if (q) q.answer = m[1].toUpperCase().charCodeAt(0) - 65;
+      continue;
+    }
+    if ((m = t.match(/^EXPLAIN\s*[:：]\s*(.*)$/i))) { if (q) q.explain = m[1].trim(); continue; }
+    if (mode === 's') script += (script ? '\n' : '') + t;
+    else if (q) { if (q.explain) q.explain += t; else if (!q.options.length) q.q += ' ' + t; }
+    else buf.push(t);
+  }
+  closeQ(); flush();
+  if (!questions.length) return null;
+  const it = { title: title || '我的题目', questions };
+  if (paras.length) it.passage = paras;
+  if (script) it.script = script;
+  return it;
+}
+
+/* 文本 → 按题型分组。分节标题认不出来时，把整段当一块自动判型。 */
+function parseMyBankText(text) {
+  const out = {};
+  const unknown = [], guessed = [], notes = [];
+  let seq = 0;
+  // 每次解析换一个时间戳，避免"两次导入各有一篇 mine-careful-1"撞 id
+  const stamp = Date.now().toString(36);
+  const put = (type, item) => {
+    if (!out[type]) out[type] = [];
+    seq++;
+    item.id = 'mine-' + type + '-' + stamp + '-' + seq;
+    item.origin = 'mine';
+    out[type].push(item);
+  };
+  const sections = _splitSections(text);
+  if (!sections.length) {
+    // 一个 === ... === 都没有：整段自动判型
+    const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
+    const g = guessImportType(lines);
+    const b = g ? buildImportItem(g, lines) : null;
+    if (b) {
+      const nm = (QTYPES[b.type] || {}).name || b.type;
+      guessed.push(nm);
+      if (b.type === 'listen') b.item.forEach(s => {
+        seq++; if (!out.listen) out.listen = [];
+        out.listen.push({ id: 'mine-listen-' + stamp + '-' + seq, text: s, origin: 'mine' });
+      });
+      else put(b.type, b.item);
+    }
+    return { out, unknown, guessed, notes };
+  }
+  for (const sec of sections) {
+    const nm = sec.name;
+    // 标题之前那段正文（name 为空）：没有标题可依，按内容判型
+    const type = nm ? sectionTypeOf(nm) : guessImportType(sec.lines);
+    if (!type) { if (nm) unknown.push(nm); continue; }
+    const b = buildImportItem(type, sec.lines);
+    if (!b) { if (nm) unknown.push(nm); continue; }
+    if (!nm) guessed.push((QTYPES[b.type] || {}).name || b.type);
+    else if (b.type !== type) {
+      notes.push('「' + nm + '」里没有选择题，我按「' + ((QTYPES[b.type] || {}).name || b.type)
+        + '」处理了');
+    }
+    if (b.type === 'listen') {
+      b.item.forEach(s => {
+        seq++; if (!out.listen) out.listen = [];
+        out.listen.push({ id: 'mine-listen-' + stamp + '-' + seq, text: s, origin: 'mine' });
+      });
+      continue;
+    }
+    put(b.type, b.item);
+  }
+  return { out, unknown, guessed, notes };
+}
+
+/* 按题型把一块文本交给对应的解析器。
+   返回 { type, item } —— type 可能和传入的不一样：
+   ⚠️「听力」是个有歧义的词，既能是听力选择题，也能是一堆听写句子。
+      给了选择题就按选择题收，没给就退成听写句子，并且**告诉用户**。 */
+function buildImportItem(type, lines) {
+  if (type === 'listen') {
+    const a = _parseListen(lines);
+    return a ? { type: 'listen', item: a } : null;
+  }
+  if (type === 'matching') {
+    const it = _parseMatching(lines);
+    return it ? { type: 'matching', item: it } : null;
+  }
+  if (type === 'cloze' || type === 'gap') {
+    const it = _parseCloze(lines);
+    if (!it) return null;
+    if (type === 'gap') delete it.options;
+    return { type: type, item: it };
+  }
+  if (['careful', 'single', 'judge', 'listening', 'quant'].indexOf(type) >= 0) {
+    const it = _parseChoice(lines);
+    if (it) {
+      // 判断题的选项是固定的 True/False(/(Not Given))，不写选项也该认得出来
+      if (type === 'judge' && !(it.questions || []).some(q => (q.options || []).length >= 2)) {
+        it.options = ['True', 'False', 'Not Given'];
+      }
+      return { type: type, item: it };
+    }
+    if (type === 'listening') {
+      const a = _parseListen(lines);
+      if (a) return { type: 'listen', item: a };
+    }
+    return null;
+  }
+  if (OPEN_TYPES.indexOf(type) >= 0) {
+    const it = _parseOpen(lines);
+    return it ? { type: type, item: it } : null;
+  }
+  return null;
+}
+
+/* 「我的题目」里各题型的名字和单位 —— 名字一律取 QTYPES，别再抄一份。
+   ⚠️ 这里**不写分值**：分值跟考试绑死（四级仔细阅读 14.2 分、雅思就是 0），
+      写在这里就等于把四级的尺子套到别的考试上。分值统一走 scorePerQOf()。 */
+function myTypeMeta(type) {
+  const q = QTYPES[type] || {};
+  return { name: q.name || type, unit: q.unit || '篇' };
+}
+
+/* ---------- 导入体检 ----------
+   把"读不出来的地方"逐条列出来。用户宁可先看到 5 条问题，
+   也不想事后发现少了两篇。
+   ⚠️ 只体检**单条题目内部**的缺失（选项不全、没标答案、题干空）。
+      **绝不**因为"这场考试少了几种题型"报问题 ——
+      「这次只导入四级阅读、没导听力」是正常用法，不是错误。 */
+function diagnoseTypes(types) {
+  const issues = [];
+  for (const t of types) {
+    const nm = myTypeMeta(t.type).name;
+    (t.items || []).forEach((it, k) => {
+      const where = nm + ' 第 ' + (k + 1) + ' 篇' + (it.title ? '「' + it.title + '」' : '');
+      const bad = [];
+      if (['careful', 'single', 'judge', 'listening', 'quant'].indexOf(t.type) >= 0) {
+        const qs = it.questions || [];
+        if (!qs.length) bad.push('没有任何小题');
+        qs.forEach((q, qi) => {
+          const os = q.options || it.options || [];
+          if (!String(q.q || '').trim()) bad.push('第 ' + (qi + 1) + ' 题没有题干');
+          if (os.length < 2) bad.push('第 ' + (qi + 1) + ' 题只有 ' + os.length + ' 个选项');
+          else if (typeof q.answer !== 'number' || q.answer < 0 || q.answer >= os.length) {
+            bad.push('第 ' + (qi + 1) + ' 题没标答案（或标了答案但不在选项里）');
+          }
+        });
+      } else if (t.type === 'matching') {
+        if (!(it.paragraphs || []).length) bad.push('没有段落正文');
+        if (!(it.statements || []).length) bad.push('没有要匹配的句子');
+        (it.statements || []).forEach((s, si) => {
+          if (!s.answer) bad.push('第 ' + (si + 1) + ' 句没标它属于哪一段');
+        });
+      } else if (t.type === 'cloze' || t.type === 'gap') {
+        const nBlank = (String(it.passage || '').match(/\{\{\d+\}\}/g) || []).length;
+        const nAns = Object.keys(it.answers || {}).length;
+        if (!nBlank) bad.push('正文里没有 {{1}} 这样标出来的空位');
+        else if (nAns < nBlank) bad.push('正文有 ' + nBlank + ' 个空，却只给了 ' + nAns + ' 个答案');
+        if (t.type === 'cloze' && (it.options || []).length < nAns) {
+          bad.push('词库里的词不够填这些空');
+        }
+      } else if (OPEN_TYPES.indexOf(t.type) >= 0) {
+        if (!String(it.material || '').trim()) bad.push('没有题目要求／材料');
+      }
+      if (bad.length) issues.push({ where, bad });
+    });
+  }
+  return issues;
+}
+
+/* 导入的内容必须属于**当前这场考试**。
+   ⚠️ 只查"多出来的"：这场考试根本不考的题型才拒绝
+      （四级里出现「听力听写」）。
+      **不查"缺的"** ——「这次只导入四级阅读、没导听力」完全正常，
+      绝不能因为少了几种题型就说"这不是四级的题"。（用户特别强调过）
+   返回的 exams 是"哪些考试真的考它"，好让用户知道该切到哪去。 */
+function checkExamFit(types) {
+  const ex = curExam();
+  const mine = typesOf(ex);
+  return types.filter(t => mine.indexOf(t.type) < 0).map(t => ({
+    type: t.type,
+    name: myTypeMeta(t.type).name,
+    n: (t.items || []).length,
+    exams: EXAMS.filter(e => typesOf(e).indexOf(t.type) >= 0).map(e => e.short || e.name),
+  }));
+}
+
+/* ==========================================================================
+   从文件里取出纯文本
+   --------------------------------------------------------------------------
+   全部在浏览器本地完成：**不联网、不上传**，你的试卷不会离开这台设备。
+   .docx / .pptx / .xlsx 本质就是 zip，浏览器原生的 DecompressionStream
+   就能解开，不用引任何第三方库。
+   ========================================================================== */
+const DOC_EXT = /^(docx|pptx|xlsx)$/;
+const IMG_EXT = /^(png|jpe?g|webp|bmp|gif|tiff?)$/;
+
+function extOf(name) {
+  const s = String(name || '').toLowerCase();
+  const i = s.lastIndexOf('.');
+  return i < 0 ? '' : s.slice(i + 1);
+}
+
+async function inflateWith(bytes, fmt) {
+  if (typeof DecompressionStream === 'undefined') return null;
+  try {
+    const st = new Blob([bytes]).stream().pipeThrough(new DecompressionStream(fmt));
+    return await new Response(st).text();
+  } catch (e) { return null; }
+}
+
+/* 极简 zip：只做"按名字取一个条目"，够解 Office 里的 XML。
+   zip 结构 = 本地头(PK\x03\x04) + 数据 … 中央目录(PK\x01\x02) … EOCD(PK\x05\x06)。
+   数据要么原样存(0)，要么 deflate(8) —— 后者交给浏览器原生解压。 */
+async function unzipEntryText(buf, nameRe) {
+  const dv = new DataView(buf), u8 = new Uint8Array(buf);
+  let eocd = -1;
+  const from = Math.max(0, u8.length - 66000);
+  for (let i = u8.length - 22; i >= from; i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) return null;
+  const n = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  const dec = new TextDecoder('utf-8');
+  for (let k = 0; k < n; k++) {
+    if (p + 46 > u8.length || dv.getUint32(p, true) !== 0x02014b50) return null;
+    const method = dv.getUint16(p + 10, true);
+    const csize = dv.getUint32(p + 20, true);
+    const nameLen = dv.getUint16(p + 28, true);
+    const extraLen = dv.getUint16(p + 30, true);
+    const cmtLen = dv.getUint16(p + 32, true);
+    const lho = dv.getUint32(p + 42, true);
+    const nm = dec.decode(u8.subarray(p + 46, p + 46 + nameLen));
+    if (nameRe.test(nm) && csize !== 0xffffffff) {
+      const lNameLen = dv.getUint16(lho + 26, true);
+      const lExtraLen = dv.getUint16(lho + 28, true);
+      const start = lho + 30 + lNameLen + lExtraLen;
+      const data = u8.subarray(start, start + csize);
+      if (method === 0) return dec.decode(data);
+      return await inflateWith(data, 'deflate-raw');
+    }
+    p += 46 + nameLen + extraLen + cmtLen;
+  }
+  return null;
+}
+
+/* Office 的 XML → 纯文本：段落/单元格结束处补换行，再剥掉标签。 */
+function officeXmlToText(xml) {
+  let s = String(xml)
+    .replace(/<w:tab\b[^>]*\/>/g, '\t').replace(/<w:br\b[^>]*\/>/g, '\n')
+    .replace(/<\/w:p>/g, '\n').replace(/<a:br\b[^>]*\/>/g, '\n')
+    .replace(/<\/a:p>/g, '\n').replace(/<\/c>/g, '\t').replace(/<\/row>/g, '\n');
+  s = s.replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+  return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/* 一段文本"像不像题目"：英文字母占比太低就说明抽出来的是乱码/空白。 */
+function looksLikeText(s) {
+  const t = String(s || '');
+  if (t.trim().length < 20) return false;
+  const letters = (t.match(/[A-Za-z]/g) || []).length;
+  const bad = (t.match(/[\u0000-\u0008\u000e-\u001f]/g) || []).length;
+  return letters / t.length > 0.25 && bad / t.length < 0.02;
+}
+
+/* 读一个文件 → 文本。返回 { ok, text } 或 { ok:false, msg }。 */
+async function readImportFile(file) {
+  const ext = extOf(file.name);
+  if (DOC_EXT.test(ext)) {
+    const buf = await file.arrayBuffer();
+    const xml = await unzipEntryText(buf, ext === 'docx'
+      ? /^word\/document\.xml$/
+      : (ext === 'pptx' ? /^ppt\/slides\/slide\d+\.xml$/ : /^xl\/sharedStrings\.xml$/));
+    if (!xml) {
+      return { ok: false, msg: '这个 Office 文件我打不开（可能是加密的，或者是改了后缀的老格式）' };
+    }
+    const txt = officeXmlToText(xml);
+    if (!looksLikeText(txt)) return { ok: false, msg: '文件里没读出多少文字，是不是空的？' };
+    return { ok: true, text: txt };
+  }
+  if (ext === 'doc') {
+    return { ok: false, msg: '这是 2003 版的老 .doc 格式，浏览器解不开。'
+      + '用 Word / WPS 打开后「另存为」.docx 或 .txt 再导。' };
+  }
+  if (ext === 'pdf') {
+    const r = await textFromPdf(await file.arrayBuffer());
+    if (!r) {
+      return { ok: false, msg: '这个 PDF 里没有可以直接复制的文字 —— 多半是扫描件（整页都是图）。'
+        + '两个办法：① 把每页截图，用图片识别；② 用 Word / WPS 打开另存为 .docx。' };
+    }
+    return { ok: true, text: r };
+  }
+  if (IMG_EXT.test(ext)) {
+    return { ok: false, image: file, msg: '这是一张图片，要走识别。' };
+  }
+  const txt = await file.text();
+  return { ok: true, text: txt };
+}
+
+/* PDF：只处理"文字型"（Word / 网页导出的）。扫描件里根本没有文字，
+   会明确告诉用户，而不是塞一堆乱码进去。
+   不引 pdf.js —— 那是几 MB 的额外体积，为了"贴一道题"不值。
+   做法：把每个 stream 解压，抓 (…) Tj 和 [ (…) ] TJ 里的字符串。 */
+async function textFromPdf(buf) {
+  const u8 = new Uint8Array(buf);
+  let raw = '';
+  const CH = 0x8000;
+  for (let i = 0; i < u8.length; i += CH) {
+    raw += String.fromCharCode.apply(null, u8.subarray(i, i + CH));
+  }
+  let out = '';
+  const re = /stream\r?\n/g;
+  let m;
+  while ((m = re.exec(raw))) {
+    const start = m.index + m[0].length;
+    const end = raw.indexOf('endstream', start);
+    if (end < 0) break;
+    re.lastIndex = end;
+    const chunk = raw.slice(start, end);
+    let txt = null;
+    if (chunk.charCodeAt(0) === 0x78) {
+      const bytes = new Uint8Array(chunk.length);
+      for (let i = 0; i < chunk.length; i++) bytes[i] = chunk.charCodeAt(i) & 0xff;
+      txt = await inflateWith(bytes, 'deflate');
+    }
+    if (!txt) txt = chunk;
+    out += pdfRunStrings(txt);
+  }
+  out = out.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  return looksLikeText(out) ? out : null;
+}
+
+/* 抓 PDF 内容流里画字的字符串：(...) Tj / (...) ' / [...] TJ */
+function pdfRunStrings(s) {
+  let out = '';
+  const re = /\((?:\\.|[^\\()])*\)/g;
+  let m, last = 0, line = '';
+  while ((m = re.exec(s))) {
+    const gap = s.slice(last, m.index);
+    last = re.lastIndex;
+    const body = m[0].slice(1, -1)
+      .replace(/\\([nrtbf()\\])/g, (x, c) => ({ n: '\n', r: '\n', t: '\t', b: '', f: '' }[c] !== undefined
+        ? ({ n: '\n', r: '\n', t: '\t', b: '', f: '' }[c]) : c))
+      .replace(/\\([0-7]{1,3})/g, (x, o) => String.fromCharCode(parseInt(o, 8)));
+    line += body;
+    // TJ/Tj 之后常见的换行标记
+    if (/\b(Tj|TJ|'|")\s*$/.test(gap) || /\bT\*|\bTd\b|\bTD\b/.test(gap)) {
+      out += line + '\n'; line = '';
+    }
+  }
+  return out + line;
+}
+
+/* ==========================================================================
+   图片：站内离线文字识别
+   --------------------------------------------------------------------------
+   引擎是 tesseract.js —— 跑在浏览器里的 WebAssembly 程序。
+   **完全本地计算：不联网、不调用任何 AI 服务、不消耗任何额度。**
+   引擎文件放在本站的 ocr/ 目录（约 6.8MB），只有你真的要用图片时才去加载，
+   平时一点流量都不花 —— 不用图片的人完全不受影响。
+   单文件版（双击打开的那个）里没有 ocr/ 目录，会自动退回
+   「请你自己把文字提出来再粘贴」，也就是"方案 1"。
+   ========================================================================== */
+let ocrLibPromise = null;
+function loadOcrLib() {
+  if (ocrLibPromise) return ocrLibPromise;
+  ocrLibPromise = new Promise((res, rej) => {
+    if (window.Tesseract && window.Tesseract.createWorker) return res(window.Tesseract);
+    const s = document.createElement('script');
+    s.src = 'ocr/tesseract.min.js';
+    s.onload = () => (window.Tesseract && window.Tesseract.createWorker)
+      ? res(window.Tesseract) : rej(new Error('引擎没起来'));
+    s.onerror = () => rej(new Error('这个版本没带识别引擎'));
+    document.head.appendChild(s);
+  });
+  ocrLibPromise.catch(() => { ocrLibPromise = null; });   // 失败别记住
+  return ocrLibPromise;
+}
+
+let ocrWorker = null;
+async function ocrImage(file, onProg) {
+  const T = await loadOcrLib();
+  if (!ocrWorker) {
+    ocrWorker = await T.createWorker('eng', 1, {
+      workerPath: 'ocr/worker.min.js',
+      corePath: 'ocr/tesseract-core-simd-lstm.wasm.js',
+      langPath: 'ocr',
+      gzip: true,
+      cacheMethod: 'none',
+      logger: m => { if (onProg && m && m.status) onProg(m); },
+    });
+  }
+  const r = await ocrWorker.recognize(file);
+  return (r && r.data) || {};
+}
+
+/* 识别质量自检：读出来的英文词太少、或者把握太低，就判"这张图看不清"，
+   让用户重拍 —— 而不是把一坨错字塞进题库，让人做题时才发现。 */
+function ocrVerdict(data) {
+  const text = String((data && data.text) || '');
+  const conf = (data && typeof data.confidence === 'number') ? data.confidence : null;
+  const words = (text.match(/[A-Za-z]{2,}/g) || []).length;
+  if (words < 8) return { ok: false, why: '几乎没读出一个完整的英文词' };
+  if (conf !== null && conf > 0 && conf < 55) {
+    return { ok: false, why: '把握只有 ' + Math.round(conf) + '%，多半太糊、太斜或者有反光' };
+  }
+  if (!looksLikeText(text)) return { ok: false, why: '读出来的内容不成句' };
+  return { ok: true, text: text };
+}
+
+/* ---------- 一次把若干文件读成文字 ---------- */
+let importReport = null;   // 最近一次导入的结果（成功/失败都留在这儿给用户看）
+let myPanelOpen = false;
+
+async function handleImportFiles(files) {
+  const list = Array.prototype.slice.call(files || []).filter(Boolean);
+  if (!list.length) return;
+  const chats = [], problems = [];
+  for (let i = 0; i < list.length; i++) {
+    const f = list[i];
+    const tag = '（' + (i + 1) + '/' + list.length + '）';
+    try {
+      importNote(tag + ' 正在读 ' + f.name + '…');
+      const r = await readImportFile(f);
+      if (r.ok) { chats.push(r.text); continue; }
+      if (r.image) {
+        try {
+          const d = await ocrImage(f, m => importNote(tag + ' 识别中：' + m.status
+            + (m.progress ? ' ' + Math.round(m.progress * 100) + '%' : '')));
+          const v = ocrVerdict(d);
+          if (v.ok) chats.push(v.text);
+          else problems.push(f.name + '：这张图我读不清 —— ' + v.why
+            + '。请重拍（正对、光线足、一页一张），或者用手机相册／微信的「提取文字」'
+            + '把文字弄出来粘到下面。');
+        } catch (e) {
+          problems.push(f.name + '：这个版本用不了站内识别（' + e.message
+            + '）。请用手机相册／微信的「提取文字」把文字取出来，粘到下面。');
+        }
+        continue;
+      }
+      problems.push(f.name + '：' + r.msg);
+    } catch (e) {
+      problems.push(f.name + '：读这个文件出错了 —— ' + e.message);
+    }
+  }
+  importNote('');
+  if (!chats.length) {
+    importReport = { ok: false, problems,
+      msg: problems.length ? '这些文件都没能读出文字。' : '没有可读的内容。' };
+    render();
+    return;
+  }
+  const text = chats.join('\n\n');
+  const ta = $('#mytext');
+  if (ta) ta.value = text;
+  const r = importMyBank(text);          // importMyBank 里会 render()
+  importReport = Object.assign({}, r, { problems, fileText: text });
+  render();
+}
+
+/* 顶部的一行状态（读取/识别进度）。没状态时就藏起来。 */
+function importNote(msg) {
+  let el = document.getElementById('mynote');
+  if (!el) {
+    const p = document.getElementById('mypanel');
+    if (!p) return;
+    el = document.createElement('div');
+    el.id = 'mynote';
+    el.className = 'meta';
+    el.style.cssText = 'margin:6px 0;color:var(--brand)';
+    p.insertBefore(el, p.firstChild);
+  }
+  el.textContent = msg;
+  el.style.display = msg ? '' : 'none';
+}
+
+/* 导入结果面板：成功说什么、失败说为什么，都摆在这儿，不用去猜。 */
+function importReportHtml() {
+  if (!importReport) return '';
+  const r = importReport;
+  let h = '<div class="card tight" style="margin-top:10px">';
+  if (r.mismatch) {
+    /* 「这场考试不考的题型」—— 直接拒绝，但把话说透：
+       是哪个题型、为什么、哪个考试考它、以及该怎么办。 */
+    h += `<div class="ttl" style="color:var(--bad)">这些不是「${esc(examShort())}」的题型，没有导入</div>`;
+    r.mismatch.forEach(m => {
+      h += `<div class="meta" style="margin-top:6px">
+        <b>${esc(m.name)}</b>（${m.n} ${esc((QTYPES[m.type] || {}).unit || '篇')}）`;
+      h += m.exams.length
+        ? ` —— ${esc(examShort())}不考它，考它的是：<b>${esc(m.exams.join('、'))}</b>`
+        : ' —— 本站目前没有哪个考试考它';
+      h += `</div>`;
+    });
+    h += `<div class="meta" style="margin-top:8px">把这几段删掉再导一次就行；`
+      + `或者切到上面提到的考试，再导这一部分。</div>`;
+    if (r.unknown && r.unknown.length) {
+      h += `<div class="meta" style="margin-top:6px">另有分节没认出来：`
+        + esc(r.unknown.join('、')) + `。标成 <code>=== 题型名 ===</code> 试试。</div>`;
+    }
+  } else if (r.ok) {
+    h += `<div class="ttl" style="color:var(--ok)">已导入到「${esc(examShort())}」</div>`;
+    h += `<div class="meta" style="margin-top:6px">${esc(r.types)}`;
+    if (typeof r.added === 'number') {
+      h += ` —— 新加 <b>${r.added}</b> 条`
+        + (r.dup ? `，${r.dup} 条和已有的重复，没重复导入` : '');
+    }
+    h += `</div>`;
+    h += `<div class="meta" style="margin-top:4px">导入是往后<b>加</b>的，不会把之前导的冲掉。</div>`;
+    if (r.guessed && r.guessed.length) {
+      h += `<div class="meta" style="margin-top:6px">没写分节标题，我按内容判成了 `
+        + esc(r.guessed.join('、')) + `。</div>`;
+    }
+    if (r.notes && r.notes.length) {
+      r.notes.forEach(x => { h += `<div class="meta" style="margin-top:6px">${esc(x)}</div>`; });
+    }
+    if (r.unknown && r.unknown.length) {
+      h += `<div class="meta" style="margin-top:6px">有分节没认出来：<b>`
+        + esc(r.unknown.join('、')) + `</b>。标成 <code>=== 题型名 ===</code> 试试。</div>`;
+    }
+    if (r.issues && r.issues.length) {
+      h += `<div class="meta" style="margin-top:8px;color:var(--warn)">`
+        + `有 ${r.issues.length} 处内容不全，做题时会缺东西：</div>`;
+      r.issues.slice(0, 20).forEach(it => {
+        h += `<div class="meta" style="margin-left:2px">· ${esc(it.where)}：${esc(it.bad.join('；'))}</div>`;
+      });
+      if (r.issues.length > 20) {
+        h += `<div class="meta">…还有 ${r.issues.length - 20} 处</div>`;
+      }
+    } else {
+      h += `<div class="meta" style="margin-top:6px">没有发现缺内容的地方。</div>`;
+    }
+  } else {
+    h += `<div class="ttl" style="color:var(--bad)">没能导入</div>`;
+    if (r.msg) h += `<div class="meta" style="margin-top:6px">${esc(r.msg)}</div>`;
+    if (r.unknown && r.unknown.length) {
+      h += `<div class="meta" style="margin-top:6px">没认出来的分节：<b>`
+        + esc(r.unknown.join('、')) + `</b></div>`;
+    }
+  }
+  (r.problems || []).forEach(p => {
+    h += `<div class="meta" style="margin-top:6px;color:var(--warn)">· ${esc(p)}</div>`;
+  });
+  return h + '</div>';
+}
 
 function parseMyBankInput(text) {
   const s = String(text || '').trim();
@@ -1836,74 +2585,121 @@ function parseMyBankInput(text) {
     if (Array.isArray(obj)) return { ok: false, msg: '这像是一个数组，请用本站导出的完整文件（含 types 字段）' };
     if (!obj || !Array.isArray(obj.types)) return { ok: false, msg: 'JSON 里没有 types 字段，不是本站导出的格式' };
     const types = obj.types.map(t => ({
-      type: t.type, typeName: t.typeName || (MY_TYPE_META[t.type] || {}).name || t.type,
-      note: t.note || '', scorePerQ: t.scorePerQ || (MY_TYPE_META[t.type] || {}).score || 0,
+      type: t.type, typeName: (QTYPES[t.type] || {}).name || t.typeName || t.type,
       items: (t.items || []).map(i => Object.assign({}, i, { origin: 'mine' })),
     })).filter(t => t.items.length);
     if (!types.length) return { ok: false, msg: 'JSON 里没有任何题目' };
-    return { ok: true, types, unknown: [] };
+    const badJ = checkExamFit(types);
+    if (badJ.length) return { ok: false, mismatch: badJ };
+    return { ok: true, types, unknown: [], guessed: [], issues: diagnoseTypes(types) };
   }
   // 文本格式
   const parsed = parseMyBankText(s);
-  const types = [];
-  for (const k of ['careful', 'matching', 'cloze', 'listen']) {
-    if (!parsed.out[k].length) continue;
-    types.push({
-      type: k, typeName: (MY_TYPE_META[k] || {}).name || k,
-      note: k === 'listen'
-        ? '我自己导入的听力句子，只保存在这台设备的浏览器里。'
-        : '我自己导入的题目，只保存在这台设备的浏览器里。',
-      scorePerQ: (MY_TYPE_META[k] || {}).score || 0,
-      items: parsed.out[k],
-    });
-  }
+  const types = Object.keys(parsed.out).map(k =>
+    ({ type: k, typeName: myTypeMeta(k).name, items: parsed.out[k] }));
   if (!types.length) {
     return {
       ok: false,
-      msg: '没解析出内容。检查一下是不是缺少 === 仔细阅读 === 这样的分节标题',
+      msg: '没解析出任何题目。看看是不是缺了 === 仔细阅读 === 这样的分节标题',
       unknown: parsed.unknown,
     };
   }
-  return { ok: true, types, unknown: parsed.unknown };
+  /* ⚠️ 只挡"这场考试不考的题型" —— **不**因为少了哪些题型就报错。
+     用户明确说过：只导入一部分（比如这次只加阅读、没加听力）是正常用法。 */
+  const bad = checkExamFit(types);
+  if (bad.length) return { ok: false, mismatch: bad, unknown: parsed.unknown };
+  return { ok: true, types, unknown: parsed.unknown, guessed: parsed.guessed,
+           notes: parsed.notes, issues: diagnoseTypes(types) };
 }
 
 /* 把「我的题目」合并进当前题库（重建，避免重复叠加） */
+/* 把「自备材料」和「我的题目」并进当前题库。
+   ⚠️ 用**重建**而不是追加，避免重复调用时越叠越多。
+   ⚠️ 还要看练习范围：mine 模式下站内自带的一律不要，
+      只留我自己导的题 —— 不然"我的题目"里还是混着一堆站里的题。 */
 function rebuildBank() {
   if (!S.base) return;
+  const mineOnly = curScope() === 'mine';
   const clone = JSON.parse(JSON.stringify(S.base));
-  const myListen = [];
-  const prepend = (types) => {
+  const mineListen = [], localListen = [];
+  const add = (types, listenBox) => {
     for (const t of (types || [])) {
       // 听力是独立的一份数据（S.listen），不在 bank.types 里
-      if (t.type === 'listen') { myListen.push.apply(myListen, t.items || []); continue; }
+      if (t.type === 'listen') { listenBox.push.apply(listenBox, t.items || []); continue; }
       const bt = clone.types.find(x => x.type === t.type);
       if (bt) bt.items = t.items.concat(bt.items);
       else clone.types.push(t);
     }
   };
-  prepend(S.localTypes);
-  prepend(myBankTypes());
+  if (mineOnly) {
+    // 先把站内自带的清空，再把我自己的加进去
+    clone.types.forEach(t => { t.items = (t.items || []).filter(x => x.origin === 'mine'); });
+    clone.types = clone.types.filter(t => t.items.length);
+  } else {
+    add(S.localTypes, localListen);      // 站里带的「自备材料」
+  }
+  add(myBankTypes(), mineListen);
   S.bank = clone;
-  S.bank.hasLocal = S.localCount || 0;
+  S.bank.hasLocal = mineOnly ? 0 : (S.localCount || 0);
   S.bank.hasMine = myBankCount();
-  S.myListenCount = myListen.length;
+  S.myListenCount = mineListen.length;
   if (S.baseListen) {
-    S.listen = { note: S.baseListen.note, items: myListen.concat(S.baseListen.items || []) };
+    const baseItems = mineOnly ? [] : (S.baseListen.items || []);
+    S.listen = { note: S.baseListen.note,
+                 items: mineListen.concat(localListen, baseItems) };
   }
 }
 
 function importMyBank(text) {
   const r = parseMyBankInput(text);
   if (!r.ok) return r;
+  const m = mergeMyBank(r.types);
   const parts = r.types.map(t => {
-    const m = MY_TYPE_META[t.type] || {};
-    return (m.name || t.type) + ' ' + t.items.length + (m.unit || '篇');
+    const meta = myTypeMeta(t.type);
+    return meta.name + ' ' + t.items.length + meta.unit;
   });
   const total = r.types.reduce((a, t) => a + t.items.length, 0);
-  LS.set('mybank', { version: today(), types: r.types });
+  LS.set(myBankKey(), { version: today(), exam: curExam().id, types: m.types });
   rebuildBank();
   render();
-  return { ok: true, n: total, types: parts.join('、'), unknown: r.unknown || [] };
+  return { ok: true, n: total, added: m.added, dup: m.dup,
+           types: parts.join('、'), unknown: r.unknown || [],
+           issues: r.issues || [], guessed: r.guessed || [], notes: r.notes || [] };
+}
+
+/* 导入是**追加**，不是覆盖 ——
+   ⚠️ 踩过：原来整份替换。用户先导了四级阅读，隔天补导听力，
+      一点"导入"，前一天的阅读就没了。而"先导一部分、之后再补"
+      恰恰是最常见的用法（用户原话：「有可能人家只是加部分四级练习题，
+      比如漏了听力」）。
+   去重按**内容指纹**：同一份文件再导一次不会变成两份，
+   改了内容再导才会作为新题加进来。 */
+function itemFingerprint(it) {
+  const c = Object.assign({}, it);
+  delete c.id; delete c.origin;
+  return JSON.stringify(c);
+}
+function mergeMyBank(newTypes) {
+  const prev = myBankTypes();
+  const out = prev.map(t => ({ type: t.type, typeName: t.typeName, items: (t.items || []).slice() }));
+  const seen = {};
+  out.forEach(t => (t.items || []).forEach(it => { seen[t.type + '|' + itemFingerprint(it)] = 1; }));
+  let added = 0, dup = 0;
+  newTypes.forEach(t => {
+    let slot = out.find(x => x.type === t.type);
+    if (!slot) {
+      slot = { type: t.type, typeName: t.typeName, items: [] };
+      out.push(slot);
+    }
+    (t.items || []).forEach(it => {
+      const k = t.type + '|' + itemFingerprint(it);
+      if (seen[k]) { dup++; return; }
+      seen[k] = 1;
+      slot.items.push(it);
+      added++;
+    });
+  });
+  return { types: out.filter(t => t.items.length), added, dup };
 }
 
 /* ---------- 我的 ---------- */
@@ -1928,36 +2724,50 @@ function vMe() {
   <div class="sec">我的题目</div>
   <div class="card tight">
     ${(myBankCount() || myListenCount())
-      ? `<div class="meta">已导入 <b>${myBankCount()}</b> 篇${
+      ? `<div class="meta">「${esc(examShort())}」已导入 <b>${myBankCount()}</b> 篇${
           myListenCount() ? ' · <b>' + myListenCount() + '</b> 句听力' : ''}，排在每类最前面。</div>`
-      : ''}
+      : `<div class="meta">导入的内容只归「${esc(examShort())}」这场考试。</div>`}
     <div class="row">
       <button class="btn ghost sm" data-mytoggle="1">导入我的题目</button>
       ${(myBankCount() || myListenCount()) ? `<button class="btn ghost sm" data-myexport="1">导出（可以传给别人）</button>
       <button class="btn ghost sm" data-myclear="1">清空</button>` : ''}
     </div>
-    <div id="mypanel" style="display:none">
-      <div class="meta" style="margin:8px 0 4px">
-        分节标题决定它归到哪一类，照着写就行：
+    <div id="mypanel"${myPanelOpen ? ' style="display:block"' : ' style="display:none"'}>
+      <div id="mydrop" class="drop">
+        <div><b>把试卷文件拖到这里</b>，或者</div>
+        <label class="btn ghost sm" style="cursor:pointer;margin-top:6px">
+          选文件
+          <input type="file" id="myfile" multiple
+            accept=".txt,.md,.csv,.tsv,.json,.docx,.pptx,.xlsx,.pdf,image/*"
+            style="display:none">
+        </label>
+        <div class="meta" style="margin-top:6px">
+          文档 / 表格 / 图片都行，一次可以选好几个。全部在本机读，
+          <b>不上传、不联网</b>。
+        </div>
       </div>
-      <div class="meta" style="font-size:12px;line-height:2;margin-bottom:6px">
-        <code>=== 仔细阅读 ===</code> <code>=== 长篇匹配 ===</code><br>
-        <code>=== 选词填空 ===</code> <code>=== 听力 ===</code>
-      </div>
-      <div class="meta" style="margin-top:2px">
-        导入目前只认上面这四类分节标题。其余题型本站自带题库，
-        想换成自己的材料，照着 <code>D:\Anki学习\阅读题库\</code> 里的格式改文件即可。
-      </div>
-      <div style="margin:8px 0">
-        <input type="file" id="myfile" accept=".txt,.json" style="font-size:12px">
-      </div>
-      <textarea id="mytext" rows="7" placeholder="也可以直接把内容粘贴在这里"
-        style="width:100%;box-sizing:border-box;font-family:ui-monospace,Consolas,monospace;font-size:12px;padding:8px;border:1px solid var(--line);border-radius:8px"></textarea>
+
+      <details class="fold" style="margin:8px 0">
+        <summary>它认得哪些写法</summary>
+        <div class="meta" style="margin:6px 0 4px">
+          分节标题决定这段归到哪一类，用 <code>=== 标题 ===</code> 包起来最保险。
+          十二个标题：仔细阅读 / 长篇匹配 / 选词填空 / 单项选择 / 判断题 /
+          听力理解 / 听力听写 / 数学 / 填空题 / 写作 / 翻译 / 口语。
+        </div>
+        <div class="meta">
+          一个标题都没写也能认：会按内容自己判型，判成什么会告诉你。
+          只导一部分也没关系 —— 只有「这场比赛根本不考的题型」才会被退回来。
+        </div>
+      </details>
+
+      <textarea id="mytext" rows="7" placeholder="也可以把文字直接粘贴在这里（手机相册长按图片就能「提取文字」）"
+        style="width:100%;box-sizing:border-box;font-family:ui-monospace,Consolas,monospace;font-size:12px;padding:8px;border:1px solid var(--line);border-radius:8px">${importReport && importReport.fileText ? esc(importReport.fileText) : ''}</textarea>
       <div class="row">
         <button class="btn" data-myimport="1">导入</button>
         <button class="btn ghost sm" data-myfmt="1">看格式示例</button>
       </div>
       <pre id="myfmt" style="display:none;font-size:11px;line-height:1.55;background:var(--bg);padding:10px;border-radius:8px;overflow:auto;margin:0">${esc(MYFORMAT_DEMO)}</pre>
+      ${importReportHtml()}
       <div class="meta" style="margin-top:8px">
         ⚠ 只导入<b>你自己有权使用</b>的材料。这个站只是工具，不带内容。
       </div>
@@ -2004,8 +2814,7 @@ function vOnboard() {
    最后填一个自己的考试日期。 */
 function vOnboardConfirm(ex) {
   const hasV = (ex.variants || []).length > 0;
-  const today = LS.get('exam', null) || {};
-  const dfltDate = (today.id === ex.id && today.date) ? today.date : (ex.date || '');
+  const dfltDate = getCfg(ex.id).date || ex.date || '';
   return `
   <div class="card">
     <div class="ttl">${esc(ex.name)}</div>
@@ -2038,6 +2847,7 @@ function vOnboardConfirm(ex) {
 }
 
 function render() {
+  ensureExamScoped();          // 先保证"这场考试"的记录已就位（见上）
   if (onboarding) {
     const picking = onboardStep === 0 || !EXAMS_BY_ID[onboardExam];
     $('#hdTitle').textContent = APP_NAME;
@@ -2072,6 +2882,15 @@ document.addEventListener('click', e => {
   const g = e.target.closest('[data-go]'); if (g) { go(g.dataset.go); return; }
 });
 
+/* 练习范围开关：整套卷子 / 我的题目 */
+document.addEventListener('click', e => {
+  const s = e.target.closest('[data-scope]');
+  if (!s) return;
+  setScope(s.dataset.scope);
+  toast(s.dataset.scope === 'mine'
+    ? '只练我自己导入的题目' : '按整套卷子的标准来');
+});
+
 /* 题型页：选项 / 提交 / 下一题 / 重做 */
 document.addEventListener('click', e => {
   if (route.indexOf('type:') !== 0) return;
@@ -2092,9 +2911,23 @@ document.addEventListener('click', e => {
     return;
   }
 
-  if (LS.get(ansKey(readType, i), null)) return;   // 已提交，只读
-
-  // 口语：把参考回答读出来
+  /* ⚠️ 这一组（翻页 / 重做 / 听一听）必须放在下面"已提交，只读"那行**前面**。
+     它们是"只看不改"的操作，交过卷的题目上照样得能用。
+     踩过：守卫写在前面，凡是已经交过卷的题目，点「下一篇」完全没反应 ——
+     表现就是用户说的"两篇的要能点下一篇有反应"，看着像按钮坏了。
+     只有"改答案"的操作（选选项、填空、提交）才该被只读挡掉。 */
+  if (e.target.closest('[data-next]')) {
+    setState(readType, (i + 1) % t.items.length); draft = null; render(); return;
+  }
+  if (e.target.closest('[data-prev]')) {
+    setState(readType, (i - 1 + t.items.length) % t.items.length);
+    draft = null; render(); return;
+  }
+  if (e.target.closest('[data-reset]')) {
+    LS.set(ansKey(readType, i), null); LS.set(draftKey(readType, i), null);
+    draft = null; render(); return;
+  }
+  // 口语：把参考回答读出来（这个按钮只在交卷后才出现）
   if (e.target.closest('[data-playsample]')) {
     const it3 = t.items[i];
     if (it3.sample) speak(it3.sample); else toast('这条没有参考回答');
@@ -2106,6 +2939,9 @@ document.addEventListener('click', e => {
     if (it2.script) speak(it2.script); else toast('这条题目没有听力材料');
     return;
   }
+
+  if (LS.get(ansKey(readType, i), null)) return;   // 已提交，只读（改答案的操作到此为止）
+
   // 口语的计时器（必须放在题型页的监听器里 —— 这里才有 t 和 i）
   if (e.target.closest('[data-spkprep]')) {
     spkStart('prep', t.items[i].prepSeconds || 60); return;
@@ -2150,18 +2986,6 @@ document.addEventListener('click', e => {
     }
     submitRead(t, i, d); return;
   }
-  const nx = e.target.closest('[data-next]');
-  if (nx) { setState(readType, (i + 1) % t.items.length); draft = null; render(); return; }
-  const pv = e.target.closest('[data-prev]');
-  if (pv) {
-    setState(readType, (i - 1 + t.items.length) % t.items.length);
-    draft = null; render(); return;
-  }
-  const rs = e.target.closest('[data-reset]');
-  if (rs) {
-    LS.set(ansKey(readType, i), null); LS.set(draftKey(readType, i), null);
-    draft = null; render(); return;
-  }
 });
 
 /* 打字：填空题的每个空、开放式的文本框。
@@ -2205,6 +3029,34 @@ document.addEventListener('change', e => {
   if (sel.value) d.a[si] = sel.value; else delete d.a[si];
   LS.set(draftKey(readType, i), d);
 });
+
+/* 选文件 / 把文件拖进来 —— 走同一条路：先读成文字，再交给解析器。
+   全程在本机完成，不上传。 */
+document.addEventListener('change', e => {
+  if (e.target && e.target.id === 'myfile') {
+    const fs = e.target.files;
+    if (fs && fs.length) {
+      importReport = null;
+      handleImportFiles(fs);
+    }
+  }
+});
+['dragenter', 'dragover'].forEach(ev => document.addEventListener(ev, e => {
+  const d = e.target.closest && e.target.closest('#mydrop');
+  if (!d) return;
+  e.preventDefault();
+  d.classList.add('over');
+}));
+['dragleave', 'drop'].forEach(ev => document.addEventListener(ev, e => {
+  const d = e.target.closest && e.target.closest('#mydrop');
+  if (!d) return;
+  e.preventDefault();
+  d.classList.remove('over');
+  if (ev === 'drop' && e.dataTransfer && e.dataTransfer.files.length) {
+    importReport = null;
+    handleImportFiles(e.dataTransfer.files);
+  }
+}));
 
 function submitRead(t, i, d) {
   const it = t.items[i];
@@ -2275,7 +3127,7 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-lcheck]')) {
     const typed = ($('#linput') || {}).value || '';
     if (!typed.trim()) { toast('先写点东西'); return; }
-    LS.set('lc:' + it.id, { typed });
+    LS.set('lc:' + curExam().id + ':' + it.id, { typed });
     const norm = s => s.toLowerCase().replace(/[^a-z0-9\s']/g, '').replace(/\s+/g, ' ').trim();
     const ok = norm(typed) === norm(it.text);
     stats.ans++; if (ok) stats.right++;
@@ -2448,8 +3300,8 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-export]')) { exportTSV(); return; }
   /* 我的题目：导入 / 导出 / 清空 */
   if (e.target.closest('[data-mytoggle]')) {
-    const p = $('#mypanel');
-    if (p) p.style.display = (p.style.display === 'block') ? 'none' : 'block';
+    myPanelOpen = !myPanelOpen;
+    render();
     return;
   }
   if (e.target.closest('[data-myfmt]')) {
@@ -2460,30 +3312,29 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-myimport]')) {
     const ta = $('#mytext');
     const r = importMyBank(ta ? ta.value : '');
-    let msg;
-    if (r.ok) {
-      msg = '识别成功 → ' + r.types;
+    importReport = r;                    // 详情在面板里显示，toast 只说一句话
+    render();
+    if (r.mismatch) {
+      toast('这些不是「' + examShort() + '」的题型：' + r.mismatch.map(m => m.name).join('、'));
+    } else if (r.ok) {
+      toast('已导入到「' + examShort() + '」：' + r.types);
     } else {
-      msg = '导入失败：' + r.msg;
+      toast('导入失败：' + (r.msg || '内容对不上'));
     }
-    if (r.unknown && r.unknown.length) {
-      msg += '；有分节没认出来：「' + r.unknown.join('」「') +
-             '」——分节标题请写成 仔细阅读 / 长篇匹配 / 选词填空 / 听力 之一';
-    }
-    toast(msg);
     return;
   }
   if (e.target.closest('[data-myexport]')) {
     download(JSON.stringify({
-      version: today(), exportedAt: new Date().toISOString(),
-      note: '英语备考训练台 · 我的题目。在「我的 → 导入我的题目」里粘贴或选这个文件即可。',
+      version: today(), exportedAt: new Date().toISOString(), exam: curExam().id,
+      note: '英语备考训练台 · 我的题目（' + examShort() + '）。在「我的 → 导入我的题目」里粘贴或选这个文件即可。',
       types: myBankTypes(),
-    }, null, 1), 'cet4_我的题目.json', 'application/json');
+    }, null, 1), '我的题目_' + examShort() + '.json', 'application/json');
     return;
   }
   if (e.target.closest('[data-myclear]')) {
-    if (confirm('清空我自己导入的题目？（其它数据不受影响）')) {
-      LS.set('mybank', null); rebuildBank(); render(); toast('已清空我的题目');
+    if (confirm('清空「' + examShort() + '」下自己导入的题目？（其它考试和其它数据不受影响）')) {
+      LS.set(myBankKey(), null); rebuildBank(); render();
+      toast('已清空这场考试的我的题目');
     }
     return;
   }
@@ -2497,7 +3348,6 @@ document.addEventListener('click', e => {
       onboardVariant = vid;
     } else {
       setExam({ id: exId, variant: vid });
-      loadExamScoped();
       toast('已选方向：' + ((EXAMS_BY_ID[exId].variants || []).find(v => v.id === vid) || {}).name);
     }
     render();
@@ -2523,11 +3373,8 @@ document.addEventListener('click', e => {
     const wasPicked = !!LS.get('onboarded', false);
     const dateEl = $('#obdate');
     const date = (dateEl && dateEl.value) || '';
-    const rec = { id: ex.id };
-    if (onboardVariant) rec.variant = onboardVariant;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) rec.date = date;
-    LS.set('exam', rec);
-    loadExamScoped();
+    const rec = setExam({ id: ex.id, variant: onboardVariant || null });
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) setExam({ id: ex.id, date });
     LS.set('onboarded', true);
     onboarding = false;
     onboardStep = 0;
@@ -2555,8 +3402,7 @@ document.addEventListener('click', e => {
       render();
       return;
     }
-    LS.set('exam', { id });          // 换考试不带旧日期、旧方向
-    loadExamScoped();                // 换成这场考试的记录（答题/错题/划线）
+    setExam({ id });                 // 只换"看哪一场"，这场自己的方向和日期都留着
     render();
     toast('已选择：' + (EXAMS_BY_ID[id].short || EXAMS_BY_ID[id].name));
     return;
@@ -2571,8 +3417,7 @@ document.addEventListener('click', e => {
       toast('已清除考试日期');
       return;
     }
-    setExam({ id: examInfo().id, date: dt });
-    render();
+    setExam({ id: examInfo().id, date: dt });    render();
     toast('已把考试日期设为 ' + dt);
     return;
   }
@@ -2615,6 +3460,7 @@ document.addEventListener('change', e => {
 */
 async function boot() {
   try {
+    migrateExamCfg();           // 老数据迁移：方向/日期搬到"每场考试各一份"
     const IN = window.__INLINE_DATA__;
     let bank, listen;
     if (IN) {
@@ -2643,7 +3489,6 @@ async function boot() {
     rebuildBank();
 
     bindSelectUnderline();      // 选中一段即划线
-    loadExamScoped();           // 读"这场考试"的答题记录 / 错题 / 划线
 
     // 第一次进来：先让用户选考试，选完再进训练台
     onboarding = !LS.get('onboarded', false);
