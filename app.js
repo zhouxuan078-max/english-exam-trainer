@@ -525,6 +525,27 @@ const LS = {
   }
 };
 
+/* ---------- 「这场考试的做题记录」----------
+   这三样都必须**按考试分开**，否则换考试会留下上一场的痕迹：
+     stats  首页的"累计答题 / 正确率"
+     wrong  错题本
+     marks  划线和排除选项
+   ⚠️ 生词本（vocab）和打卡（days）**不**在这里面 ——
+      背过的词、坚持的天数是跨考试积累的，换考试不该清零。 */
+let stats = { ans: 0, right: 0 };
+let wrong = [];
+let marks = {};
+function scopeKeys() {
+  const id = curExam().id;
+  return { stats: 'stats:' + id, wrong: 'wrong:' + id, marks: 'marks:' + id };
+}
+function loadExamScoped() {
+  const k = scopeKeys();
+  stats = LS.get(k.stats, { ans: 0, right: 0 }) || { ans: 0, right: 0 };
+  wrong = LS.get(k.wrong, []) || [];
+  marks = LS.get(k.marks, {}) || {};
+}
+
 /* 某个题型已经做了多少条（提交过的条目才会留下 ans:<题型>:<序号>） */
 /* 答题记录的键 = 考试 + 题型 + 第几题。
    ⚠️ **必须带上考试**：题库是所有考试共用的一份，键里不带考试的话，
@@ -535,11 +556,9 @@ function draftKey(typeId, i) { return 'draft:' + curExam().id + ':' + typeId + '
 function doneCountOf(typeId) {
   return LS.keys('ans:' + curExam().id + ':' + typeId + ':').length;
 }
-let wrong = LS.get('wrong', []);
 let vocab = LS.get('vocab', []);
 let days = LS.get('days', []);
 let prog = LS.get('prog', {});          // type -> 当前第几篇
-let stats = LS.get('stats', { ans: 0, right: 0 });
 
 const $ = s => document.querySelector(s);
 const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -764,7 +783,6 @@ function wrap(text) {
 
    划线存的是**字符区间** [{s, e}]（相对短文纯文本的偏移），不是"哪个词" ——
    所以可以自由选一段话划上，而不是只能一个个词点。 */
-let marks = LS.get('marks', {});    // { 'careful:xxx': { r:[{s,e}], o:['0:2'] } }
 
 function curReadItem() {
   if (route.indexOf('type:') !== 0) return null;
@@ -831,19 +849,19 @@ function toggleRangeMark(key, c, s, e) {
   });
   if (!touched) out.push({ c: c, s: s, e: e });          // 全新的一段，划上
   m.r = out.filter(r => r.e - r.s > 0);
-  LS.set('marks', marks);
+  LS.set(scopeKeys().marks, marks);
   return !touched;                                       // true = 这次是"划上"
 }
 function clearRangeMarks(key) {
   getMarks(key).r = [];
-  LS.set('marks', marks);
+  LS.set(scopeKeys().marks, marks);
 }
 
 function toggleOptMark(key, pick) {
   const m = getMarks(key);
   const i = m.o.indexOf(pick);
   if (i >= 0) m.o.splice(i, 1); else m.o.push(pick);
-  LS.set('marks', marks);
+  LS.set(scopeKeys().marks, marks);
   return i < 0;
 }
 
@@ -1065,10 +1083,26 @@ function vHome() {
       }, 0);
       const done = types.reduce((a, t) => a + doneCountOf(t), 0);
       const pct = total ? Math.round(done / total * 100) : 0;
+      // 统分：每个题型"答对几小题 × 官方每题分值"，加起来
+      // —— 分值从这场考试的卷面来（四级仔细阅读 142÷10 = 14.2），所以是官方那套算法
+      let got = 0, scorable = 0;
+      types.forEach(t => {
+        const per = scorePerQOf(t);
+        const bt = S.bank && S.bank.types.find(x => x.type === t);
+        if (!per || !bt) return;
+        scorable++;
+        got += correctCountOf(bt) * per;
+      });
+      const all = total > 0 && done >= total;
+      const scoreTxt = scorable === 0 ? ''
+        : (all
+          ? `折算总分 <b>${(+got.toFixed(1))}</b> 分`
+          : `已得 <b>${(+got.toFixed(1))}</b> 分`);
       return `<div class="pbar"><i style="width:${pct}%"></i></div>
         <div class="meta" style="margin:9px 0 0">
           已做 <b>${done}</b> / ${total} 项 · <b>${pct}%</b>${
-            done >= total && total ? '（这套卷子刷完了）' : ''}</div>`;
+            all ? '（这套卷子做完了）' : ''}</div>
+        ${scoreTxt ? `<div class="meta" style="margin-top:4px">${scoreTxt}</div>` : ''}`;
     })()}
   </div>
 
@@ -2208,7 +2242,7 @@ function submitRead(t, i, d) {
     }
   }
   stats.ans += total; stats.right += right;
-  LS.set('stats', stats); LS.set('wrong', wrong);
+  LS.set(scopeKeys().stats, stats); LS.set(scopeKeys().wrong, wrong);
   markDay();
   render();
 }
@@ -2245,7 +2279,7 @@ document.addEventListener('click', e => {
     const norm = s => s.toLowerCase().replace(/[^a-z0-9\s']/g, '').replace(/\s+/g, ' ').trim();
     const ok = norm(typed) === norm(it.text);
     stats.ans++; if (ok) stats.right++;
-    LS.set('stats', stats); markDay();
+    LS.set(scopeKeys().stats, stats); markDay();
     render(); return;
   }
   if (e.target.closest('[data-lskip]')) { li = (li + 1) % S.listen.items.length; render(); return; }
@@ -2280,6 +2314,27 @@ function spkStart(phase, secs) {
     }
     spkPaint();
   }, 1000);
+}
+
+/* 某个题型**答对了几小题** —— 从已交卷的记录里现算。
+   ⚠️ 不另存一份"答对数"：存了就会和 ans: 记录对不上（改答案、重做都会不同步）。
+      ans: 才是唯一来源。 */
+function correctCountOf(t) {
+  let right = 0;
+  (t.items || []).forEach((it, i) => {
+    const a = LS.get(ansKey(t.type, i), null);
+    if (!a) return;
+    if (t.type === 'cloze' || t.type === 'gap') {
+      Object.keys(it.answers || {}).forEach(n => {
+        if (normAns((a.p || {})[n]) === normAns(it.answers[n])) right++;
+      });
+    } else if (t.type === 'matching') {
+      (it.statements || []).forEach((q, k) => { if ((a.a || {})[k] === q.answer) right++; });
+    } else if (OPEN_TYPES.indexOf(t.type) < 0) {
+      (it.questions || []).forEach((q, k) => { if ((a.a || {})[k] === q.answer) right++; });
+    }
+  });
+  return right;
 }
 
 /* 拼一份可以直接粘给 AI 的提问。
@@ -2442,6 +2497,7 @@ document.addEventListener('click', e => {
       onboardVariant = vid;
     } else {
       setExam({ id: exId, variant: vid });
+      loadExamScoped();
       toast('已选方向：' + ((EXAMS_BY_ID[exId].variants || []).find(v => v.id === vid) || {}).name);
     }
     render();
@@ -2471,6 +2527,7 @@ document.addEventListener('click', e => {
     if (onboardVariant) rec.variant = onboardVariant;
     if (/^\d{4}-\d{2}-\d{2}$/.test(date)) rec.date = date;
     LS.set('exam', rec);
+    loadExamScoped();
     LS.set('onboarded', true);
     onboarding = false;
     onboardStep = 0;
@@ -2499,6 +2556,7 @@ document.addEventListener('click', e => {
       return;
     }
     LS.set('exam', { id });          // 换考试不带旧日期、旧方向
+    loadExamScoped();                // 换成这场考试的记录（答题/错题/划线）
     render();
     toast('已选择：' + (EXAMS_BY_ID[id].short || EXAMS_BY_ID[id].name));
     return;
@@ -2522,7 +2580,9 @@ document.addEventListener('click', e => {
     if (confirm('清空生词本？')) { vocab = []; LS.set('vocab', vocab); render(); } return;
   }
   if (e.target.closest('[data-clearwrong]')) {
-    if (confirm('清空错题本？')) { wrong = []; LS.set('wrong', wrong); render(); } return;
+    if (confirm('清空错题本？')) {
+      wrong = []; LS.set(scopeKeys().wrong, wrong); render();
+    } return;
   }
   if (e.target.closest('[data-resetall]')) {
     if (confirm('清空全部本地数据？错题、生词、打卡、答题记录都会没。')) {
@@ -2583,6 +2643,7 @@ async function boot() {
     rebuildBank();
 
     bindSelectUnderline();      // 选中一段即划线
+    loadExamScoped();           // 读"这场考试"的答题记录 / 错题 / 划线
 
     // 第一次进来：先让用户选考试，选完再进训练台
     onboarding = !LS.get('onboarded', false);
