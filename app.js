@@ -39,6 +39,7 @@ const QTYPES = {
   write:     { name: '写作',     impl: false, unit: '篇' },
   translate: { name: '翻译',     impl: false, unit: '题' },
   speak:     { name: '口语',     impl: false, unit: '题' },
+  quant:     { name: '数学',     impl: false, unit: '题' },
 };
 
 /* 考试清单。只收**大学阶段及以上**的考试（本科 / 研究生 / 出国 / 职场），不含中小学。
@@ -77,6 +78,36 @@ const KY_PAPER = (trPct, wrPct) => [
   { t: 'translate', label: '翻译',            count: 5,  pct: trPct, score: trPct },
   { t: 'write',     label: '写作',            count: 2,  pct: wrPct, score: wrPct,
     parts: '应用文 + 短文' },
+];
+
+/* 雅思 A 类 / G 类：题量和占比完全一样（四项各 25%），
+   差在阅读的文章类型和写作 Task 1 的形式 */
+const IELTS_PAPER = cls => [
+  { t: 'listening', label: '听力', count: 40, pct: 25, parts: '4 段录音' },
+  // 官方只给"阅读 40 题 / 25%"，不细分；但实际要练这三种
+  { t: 'single',    label: '阅读', count: 40, pct: 25,
+    parts: cls === 'a'
+      ? '3 篇长文 · 选择 · 判断（T/F/NG）· 标题匹配 · 填空 / 简答'
+      : '5 个部分 · 生活题材 · 判断 · 匹配 · 填空 / 简答',
+    drill: ['single', 'judge', 'gap'] },
+  { t: 'write',     label: '写作', count: 2, pct: 25,
+    parts: cls === 'a'
+      ? 'Task 1 图表描述 150 词 · Task 2 议论文 250 词'
+      : 'Task 1 书信 150 词 · Task 2 议论文 250 词' },
+  { t: 'speak',     label: '口语', count: 3, pct: 25, parts: '3 个部分' },
+];
+
+/* BEC 初 / 中 / 高：四项各占 25%，但**总分的量表上限不一样**
+   （剑桥英语分数量表：初级 102–170、中级 122–190、高级 142–210），
+   阅读的"部分数"也不同（7 / 5 / 6）—— 这是各级别唯一确切的差别，
+   题量本身都是 阅读 45 + 听力 30 + 写作 2 + 口语 3。
+   分值列留空：剑桥只公布"四科单项分的平均分即总分"，
+   不给每部分占多少分，硬折算就是编数字。 */
+const BEC_PAPER = part => [
+  { t: 'single',    label: '阅读', count: 45, pct: 25, parts: part + ' 个部分' },
+  { t: 'write',     label: '写作', count: 2,  pct: 25 },
+  { t: 'listening', label: '听力', count: 30, pct: 25 },
+  { t: 'speak',     label: '口语', count: 3,  pct: 25 },
 ];
 
 const EXAMS = [
@@ -130,19 +161,10 @@ const EXAMS = [
   { id: 'ielts', group: '出国', name: '雅思 IELTS', short: '雅思',
     q: 85, full: 9,
     variants: [
-      { id: 'a', name: 'A 类（学术）', note: '出国留学用' },
-      { id: 'g', name: 'G 类（培训）', note: '移民 / 工作用' },
+      { id: 'a', name: 'A 类（学术）', note: '出国留学用', paper: IELTS_PAPER('a') },
+      { id: 'g', name: 'G 类（培训）', note: '移民 / 工作用', paper: IELTS_PAPER('g') },
     ],
-    paper: [
-      { t: 'listening', label: '听力', count: 40, pct: 25, parts: '4 段录音' },
-      // 官方只给"阅读 40 题 / 25%"，不细分；但实际要练这三种
-      { t: 'single',    label: '阅读', count: 40, pct: 25,
-        parts: '选择 · 判断（T/F/NG）· 标题匹配 · 填空 · 简答',
-        drill: ['single', 'judge', 'gap'] },
-      { t: 'write',     label: '写作', count: 2,  pct: 25,
-        parts: 'A 类：图表描述 + 议论文 · G 类：书信 + 议论文' },
-      { t: 'speak',     label: '口语', count: 3,  pct: 25, parts: '3 个部分' },
-    ] },
+    paper: IELTS_PAPER('a') },
 
   { id: 'toefl', group: '出国', name: '托福 TOEFL iBT', short: '托福',
     q: 54, full: 120,
@@ -176,12 +198,17 @@ const EXAMS = [
     ] },
 
   { id: 'gre', group: '出国', name: 'GRE', short: 'GRE',
-    full: 340,
+    q: 55, full: 340,
+    // 官方：文字推理 2 部分 27 题（130–170 分）、数量推理 2 部分 27 题（130–170 分）、
+    //       分析性写作 1 题（0–6 分，单独计分，不计入 340）
     paper: [
-      { t: 'gap',    label: '填空', count: 0, pct: 0,
-        parts: 'Text Completion · Sentence Equivalence' },
-      { t: 'single', label: '阅读理解', count: 0, pct: 0 },
-      { t: 'write',  label: '分析性写作', count: 1, pct: 0, parts: 'Issue 任务（0–6 分）' },
+      { t: 'single', label: '文字推理（Verbal）', count: 27, pct: 50, score: 170,
+        parts: '填空（Text Completion · Sentence Equivalence）· 阅读理解',
+        drill: ['single', 'gap'] },
+      { t: 'quant',  label: '数量推理（Quant）', count: 27, pct: 50, score: 170,
+        parts: '数量比较 · 单选 · 数值填空' },
+      { t: 'write',  label: '分析性写作', count: 1, pct: 0, score: null,
+        parts: 'Analyze an Issue（单独计分 0–6）' },
     ] },
 
   { id: 'sat', group: '出国', name: 'SAT', short: 'SAT',
@@ -193,18 +220,16 @@ const EXAMS = [
 
   /* ———————————————— 职场 ———————————————— */
   { id: 'bec', group: '职场', name: '商务英语 BEC', short: 'BEC',
-    full: 100,
+    q: 80, full: 170,
     variants: [
-      { id: 'p', name: '初级', note: 'Preliminary' },
-      { id: 'v', name: '中级', note: 'Vantage' },
-      { id: 'h', name: '高级', note: 'Higher' },
+      { id: 'p', name: '初级', note: 'Preliminary · 满分 170',
+        full: 170, paper: BEC_PAPER(7) },
+      { id: 'v', name: '中级', note: 'Vantage · 满分 190',
+        full: 190, paper: BEC_PAPER(5) },
+      { id: 'h', name: '高级', note: 'Higher · 满分 210',
+        full: 210, paper: BEC_PAPER(6) },
     ],
-    paper: [
-      { t: 'single',    label: '阅读', count: 0,  pct: 25, score: 25 },
-      { t: 'write',     label: '写作', count: 2,  pct: 25, score: 25 },
-      { t: 'listening', label: '听力', count: 30, pct: 25, score: 25 },
-      { t: 'speak',     label: '口语', count: 3,  pct: 25, score: 25 },
-    ] },
+    paper: BEC_PAPER(7) },
 
   { id: 'toeic', group: '职场', name: '托业 TOEIC（听力与阅读）', short: '托业',
     q: 200, full: 990,
@@ -216,44 +241,49 @@ const EXAMS = [
     ] },
 ];
 
-/* 有的考试分方向，方向会改变题目构成 —— 由使用者选一次 */
-function curVariant(ex) {
+/* 有方向的考试：拿到"当前生效的方向"。
+   ⚠️ vid 参数很关键 —— 确认页上方向还没落盘（存在 onboardVariant 里），
+      只看 localStorage 的话，页面上选什么都读不到，表格永远显示基础卷面。
+      踩过：考研英语一/二点了没区别，就是因为这里只认 localStorage。 */
+function variantFor(ex, vid) {
   ex = ex || curExam();
+  if (vid) return (ex.variants || []).find(v => v.id === vid) || null;
   const sel = LS.get('exam', null) || {};
   if (sel.id !== ex.id || !sel.variant) return null;
   return (ex.variants || []).find(v => v.id === sel.variant) || null;
 }
+function curVariant(ex) { return variantFor(ex, null); }
 
 /* 当前方向下的试卷结构。方向自带 paper 就用它的
    （考研英语一/二只有翻译和写作的分值不同） */
-function paperOf(ex) {
+function paperOf(ex, vid) {
   ex = ex || curExam();
-  const v = curVariant(ex);
+  const v = variantFor(ex, vid);
   if (v && v.paper && v.paper.length) return v.paper;
   return ex.paper || [];
 }
 
 /* 本场考试的满分（四级 710、托福 120、雅思 9…） */
-function fullOf(ex) {
+function fullOf(ex, vid) {
   ex = ex || curExam();
-  const v = curVariant(ex);
+  const v = variantFor(ex, vid);
   return (v && v.full) || ex.full || null;
 }
 
 /* 本场考试的卷面总题量 */
-function qOf(ex) {
+function qOf(ex, vid) {
   ex = ex || curExam();
-  const v = curVariant(ex);
+  const v = variantFor(ex, vid);
   return (v && v.q) || ex.q || null;
 }
 
 /* 题型从试卷结构派生 —— 唯一来源。
    row.t 是这一行的主题型；row.drill 是"官方不细分、但要分头练"的额外题型
    （目前只有雅思阅读用：官方只给"40 题 / 25%"，实际要练选择/判断/填空）。 */
-function typesOf(ex) {
+function typesOf(ex, vid) {
   ex = ex || curExam();
   const seen = [];
-  paperOf(ex).forEach(p => {
+  paperOf(ex, vid).forEach(p => {
     [p.t].concat(p.drill || []).forEach(t => {
       if (t && seen.indexOf(t) < 0) seen.push(t);
     });
@@ -263,11 +293,18 @@ function typesOf(ex) {
 
 /* 表尾「合计」。用考试自己声明的总数 —— 它才是这场考试的卷面总量；
    靠每行相加会算少（雅思阅读那行官方不给细分题量/分值）。 */
-function paperTotals(ex) {
+function paperTotals(ex, vid) {
   ex = ex || curExam();
-  const rows = paperOf(ex);
-  const allNum = k => rows.length > 0 && rows.every(r => (r[k] || 0) > 0);
-  return { q: qOf(ex), full: fullOf(ex), pct: allNum('pct') ? 100 : null };
+  const rows = paperOf(ex, vid);
+  // 占比：把**有占比的行**加起来，正好 100 就是 100%。
+  // 不要求"每行都有" —— GRE 的写作不计入 340，它没有占比，
+  // 但不该因此把整行合计拖成 "—"。自适应考试（多邻国 / PTE）每行都是 0，
+  // 加起来是 0，合计自然显示 "—"，这符合"官方本来就没有"的事实。
+  const sumPct = rows.reduce((n, r) => n + (r.pct || 0), 0);
+  return {
+    q: qOf(ex, vid), full: fullOf(ex, vid),
+    pct: Math.abs(sumPct - 100) < 0.001 ? 100 : null,
+  };
 }
 
 /* 试卷结构表 —— 选考试页 和「我的考试」两处共用。
@@ -276,10 +313,10 @@ function paperTotals(ex) {
       四级按 710 制：写作 106.5 / 听力 248.5 / 选词 35.5 / 长篇 71 /
       仔细 142 / 翻译 106.5 —— 和站内判分（scorePerQ）是同一把尺子。
    ⛔ 曾经把百分比填在「分值」列下（15/35/5/10/20/15），是错的。 */
-function paperTable(ex) {
-  const rows = paperOf(ex);
+function paperTable(ex, vid) {
+  const rows = paperOf(ex, vid);
   if (!rows.length) return '<div class="empty">这个考试没有固定卷面。</div>';
-  const t = paperTotals(ex);
+  const t = paperTotals(ex, vid);
   const cell = v => (v || v === 0) && v !== 0 ? String(v) : '<i>—</i>';
   return `<table class="pt">
     <thead><tr><th>题型</th><th class="num">题量</th>
@@ -741,7 +778,7 @@ function go(r) {
 const NAV_TYPE_ICON = {
   careful: '📄', matching: '🧩', cloze: '✏️', listen: '🎧',
   single: '🔤', listening: '🔊', judge: '⚖️', gap: '⬜',
-  write: '✍️', translate: '🈶', speak: '🗣️',
+  write: '✍️', translate: '🈶', speak: '🗣️', quant: '➗',
 };
 
 /* 每个题型一句话说清它是什么（"还没做"的页面靠它解释） */
@@ -759,6 +796,8 @@ const TYPE_DESC = {
   write:    '写作：给一个题目，你写一篇短文（四六级是 120~180 词的短文写作，占 15%）。需要批改评分，自动判分很难。',
   translate: '翻译：给一段中文，翻译成英文。四六级考的是汉译英段落翻译，占 15%，同样需要批改。',
   speak:    '口语：要录音和评分，网页里做不完整，放最后。',
+  quant:    '数学：GRE 的数量推理部分（数量比较 / 单选 / 数值填空）。'
+          + '本站是英语训练台，这块没打算做。',
 };
 
 function navItems() {
@@ -1746,7 +1785,6 @@ function vOnboard() {
    最后填一个自己的考试日期。 */
 function vOnboardConfirm(ex) {
   const hasV = (ex.variants || []).length > 0;
-  const v = onboardVariant ? (ex.variants || []).find(x => x.id === onboardVariant) : null;
   const today = LS.get('exam', null) || {};
   const dfltDate = (today.id === ex.id && today.date) ? today.date : (ex.date || '');
   return `
@@ -1761,7 +1799,7 @@ function vOnboardConfirm(ex) {
 
   <div class="sec">试卷结构</div>
   <div class="card tight">
-    ${paperTable(ex)}
+    ${paperTable(ex, onboardVariant)}
   </div>
 
   <div class="sec">考试日期</div>
@@ -1774,7 +1812,7 @@ function vOnboardConfirm(ex) {
 
   <div class="card tight">
     <div class="row" style="margin:0;gap:8px;flex-wrap:wrap">
-      <button class="btn" data-obbegin="1">${hasV && !v ? '先选个方向' : '就这个，进去'}</button>
+      <button class="btn" data-obbegin="1">就这个，进去</button>
       <button class="btn ghost" data-obback="1">← 换一个考试</button>
     </div>
   </div>`;
@@ -2065,8 +2103,9 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-obbegin]')) {
     const ex = EXAMS_BY_ID[onboardExam];
     if (!ex) return;
+    // 兜底：正常情况下进确认页就默认选了第一个方向
     if ((ex.variants || []).length && !onboardVariant) {
-      toast('先选一个方向'); return;
+      onboardVariant = ex.variants[0].id;
     }
     const wasPicked = !!LS.get('onboarded', false);
     const dateEl = $('#obdate');
@@ -2094,7 +2133,10 @@ document.addEventListener('click', e => {
     if (onboarding) {
       onboardExam = id;
       onboardStep = 1;
-      onboardVariant = null;
+      // 默认选中第一个方向 —— 否则表格没有基准，
+      // 点"第一个方向"看着像没反应（本来显示的就是它的基础卷面）
+      const e2 = EXAMS_BY_ID[id];
+      onboardVariant = (e2.variants || []).length ? e2.variants[0].id : null;
       window.scrollTo(0, 0);
       render();
       return;
