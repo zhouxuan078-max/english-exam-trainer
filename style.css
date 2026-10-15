@@ -64,24 +64,26 @@ h1 { font-size: 17px; font-weight: 600; }
 .helpcard li b { color: var(--fg); }
 
 /* 底部导航 */
+/* 底部导航：**永远等宽**（1fr 均分），装不下就让文字换行，不横滑。
+   —— 原来是 flex + "题型多时改成横向滚动"，结果每一项宽度跟着文字长短走，
+      有的宽有的窄，看着不齐（用户指出"图标要均匀分布"）。
+      改成等宽网格后，不管这个考试有 2 种还是 9 种题型都整齐。 */
 nav {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
   background: var(--card); border-top: 1px solid var(--line);
-  display: flex; padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+  display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
+  padding: 6px 2px calc(6px + env(safe-area-inset-bottom));
 }
 nav button {
-  flex: 1; background: none; border: 0; cursor: pointer;
+  background: none; border: 0; cursor: pointer; min-width: 0;
   display: flex; flex-direction: column; align-items: center; gap: 2px;
-  font-size: 11px; color: var(--fg3); padding: 6px 2px; font-family: inherit;
+  font-size: 10.5px; line-height: 1.15; color: var(--fg3);
+  padding: 6px 1px; font-family: inherit; text-align: center;
+  overflow-wrap: anywhere;
 }
-nav button .ic { font-size: 18px; line-height: 1; filter: grayscale(1) opacity(.55); }
+nav button .ic { font-size: 17px; line-height: 1; filter: grayscale(1) opacity(.55); }
 nav button.on { color: var(--brand); font-weight: 500; }
 nav button.on .ic { filter: none; }
-
-/* 题型多的时候（雅思 9 项）横向滚动，不挤压每个按钮 */
-nav.wide { overflow-x: auto; justify-content: flex-start; scrollbar-width: none; }
-nav.wide::-webkit-scrollbar { display: none; }
-nav.wide button { flex: 0 0 auto; min-width: 64px; padding-left: 8px; padding-right: 8px; }
 
 /* 卡片 */
 .card {

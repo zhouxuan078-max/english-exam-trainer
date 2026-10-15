@@ -761,14 +761,29 @@ function getMarks(key) {
   return marks[key];
 }
 
-/* 选一段 → 划上；再选一模一样的一段 → 取消。
+/* 选一段 → 划上；选到**已经有划线的地方** → 取消那一部分。
+   ⚠️ 判断标准是"有没有重叠"，不是"是否一模一样" ——
+      拖选很难选到字符级完全相同（通常差一个空格、少一个字），
+      按"完全相同才取消"来做，用户会觉得"取消不掉"。
+   所以这里用涂改带的做法：
+     和已有划线完全不重叠 → 加上
+     有任何重叠           → 把重叠部分从已有划线里减掉（可能一分为二）
    区间按字符偏移存，重渲染后靠 applyMarks 逐词回填 .ul。 */
 function toggleRangeMark(key, s, e) {
+  if (e < s) { const t = s; s = e; e = t; }
   const m = getMarks(key);
-  const idx = m.r.findIndex(r => r.s === s && r.e === e);
-  if (idx >= 0) m.r.splice(idx, 1); else m.r.push({ s: s, e: e });
+  let touched = false;
+  const out = [];
+  m.r.forEach(r => {
+    if (r.e <= s || r.s >= e) { out.push(r); return; }   // 不重叠，原样保留
+    touched = true;
+    if (r.s < s) out.push({ s: r.s, e: s });             // 左边没被盖到的部分
+    if (r.e > e) out.push({ s: e, e: r.e });             // 右边没被盖到的部分
+  });
+  if (!touched) out.push({ s: s, e: e });                // 全新的一段，划上
+  m.r = out.filter(r => r.e - r.s > 0);
   LS.set('marks', marks);
-  return idx < 0;
+  return !touched;                                       // true = 这次是"划上"
 }
 function clearRangeMarks(key) {
   getMarks(key).r = [];
@@ -877,14 +892,13 @@ function navItems() {
 function renderNav() {
   const nav = document.querySelector('nav');
   if (!nav) return;
-  if (onboarding) { nav.innerHTML = ''; nav.classList.remove('wide'); return; }
+  if (onboarding) { nav.innerHTML = ''; return; }
   const items = navItems();
   if (!items.some(x => x.k === route)) route = 'home';   // 当前页没了就回首页
   nav.innerHTML = items.map(x =>
     `<button data-nav="${x.k}" class="${route === x.k ? 'on' : ''}">` +
     `<span class="ic">${x.ic}</span>${x.n}</button>`).join('');
-  // 题型多的时候（雅思 9 项）横向滚动，不挤压
-  nav.classList.toggle('wide', items.length > 5);
+  // 等宽由 CSS 的 grid-auto-columns: 1fr 保证，这里不用再切换样式
 }
 
 /* 导航是动态重建的，所以用事件委托绑点击 */
@@ -1762,13 +1776,7 @@ function importMyBank(text) {
 }
 
 /* ---------- 我的 ---------- */
-/* 只有在本机服务下才显示"手机扫码"入口（线上站没有 /qr 这个路由） */
-function isLocalServe() {
-  const h = location.hostname;
-  return location.protocol.startsWith('http') &&
-    (h === '127.0.0.1' || h === 'localhost' ||
-     /^192\.168\./.test(h) || /^10\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h));
-}
+
 
 function vMe() {
   const total = stats.ans, acc = total ? Math.round(stats.right / total * 100) : 0;
@@ -1780,14 +1788,6 @@ function vMe() {
     <div class="stat"><div class="k">错题 / 生词</div><div class="v">${wrong.length} <small>/ ${vocab.length}</small></div></div>
   </div>
 
-  ${isLocalServe() ? `
-  <div class="sec">手机上刷</div>
-  <div class="card tight">
-    <div class="meta" style="margin:0 0 10px">手机连同一个 WiFi，扫一下就能进，进度存在手机上。</div>
-    <div class="row" style="margin:0">
-      <a class="btn" href="/qr" target="_blank" rel="noopener">显示二维码 ↗</a>
-    </div>
-  </div>` : ''}
 
   ${vExamPick()}
 
@@ -2199,12 +2199,12 @@ function bindSelectUnderline() {
       const txt = r.toString();
       if (!txt.trim()) return;
       const s = selOffset(pEl, r.startContainer, r.startOffset);
-      toggleRangeMark(ctx.key, s, s + txt.length);
+      const added = toggleRangeMark(ctx.key, s, s + txt.length);
       sel.removeAllRanges();
       // 重渲染（而不是只 applyMarks）：让头部的「清除划线」立刻出现。
       // 这里已经清掉选区了，重渲染不会丢焦点。
       render();
-      toast('已划线（再选一模一样的一段可取消）');
+      toast(added ? '已划线（选到划线的地方可以取消）' : '已取消这一段划线');
     }, 10);
   }));
 }
