@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#185fa5">
+<meta name="description" content="四级阅读听力刷题台：仔细阅读、长篇匹配、选词填空、听力听写，离线可用，含生词本与错题本。">
+<title>四级训练台</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23185fa5'/><text y='72' x='50' font-size='58' text-anchor='middle' fill='white' font-family='sans-serif'>四</text></svg>">
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div>
+      <h1 id="hdTitle">四级训练台</h1>
+      <div class="sub" id="hdSub">加载中…</div>
+    </div>
+    <div style="text-align:right">
+      <div class="sub" id="hdCount"></div>
+      <div class="sub" id="hdClock"></div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap" id="view"></main>
+
+<div class="pop hide" id="pop"></div>
+
+<nav>
+  <button data-nav="home" class="on"><span class="ic">🏠</span>首页</button>
+  <button data-nav="read"><span class="ic">📖</span>阅读</button>
+  <button data-nav="listen"><span class="ic">🎧</span>听力</button>
+  <button data-nav="vocab"><span class="ic">🔖</span>生词</button>
+  <button data-nav="me"><span class="ic">📊</span>我的</button>
+</nav>
+
+<script src="app.js"></script>
+</body>
+</html>

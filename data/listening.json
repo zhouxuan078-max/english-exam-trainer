@@ -1,0 +1,605 @@
+{
+ "note": "从 Project Gutenberg 公有领域文本中抽取的句子，用浏览器内置语音合成朗读，作听写练习。",
+ "items": [
+  {
+   "id": "L001",
+   "text": "There was no doubt about the earnestness of these men: they were not raising that kite for fun.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L002",
+   "text": "Whether Marconi stood to one side and directed or took hold with his men, there was no doubt who was master.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L003",
+   "text": "At last the kite was flying gallantly, high overhead in the blue.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L004",
+   "text": "From the sagging kite-string hung a wire that ran into the low stone house.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L005",
+   "text": "Most men would have given up aerial navigation after such an experience, but Santos-Dumont could not be deterred from continuing his experiments.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L006",
+   "text": "The night of the very day which witnessed his fearful fall and the destruction of No.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L007",
+   "text": "6. It showed the pluck and determination of the man as nothing else could.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L008",
+   "text": "Twenty-two days after the aeronaut's narrow escape his new air-ship was finished and ready for a flight.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L009",
+   "text": "The new air-ship worked well, and the experimental flights were successful with one exception--when the balloon came in contact with a tree.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L010",
+   "text": "1 cylinder is doing the work from the force of the explosion, No.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L011",
+   "text": "3 is getting a fresh supply of gas, and No.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L012",
+   "text": "A four-cylinder motor is practically putting forth power continuously, since one of the four pistons is always at work.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L013",
+   "text": "Electricity is used to make the spark that explodes the gas at just the right moment in the cylinders.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L014",
+   "text": "All this is automatic, though sometimes the driver has to resort to the persuasive qualities of a monkey-wrench and an oil-can.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L015",
+   "text": "Besides the calls for numbers within the cities there are the out-of-town calls.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L016",
+   "text": "In this case central simply makes connection with Long Distance, which is a separate company, though allied with the city companies.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L017",
+   "text": "Long Distance makes the connection in much the same way as the branch city exchanges.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L018",
+   "text": "An automatic time stamp accomplishes this without possibility of error.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L019",
+   "text": "Sometimes the calls come from a pay station, in which case a record must be kept of the time occupied.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L020",
+   "text": "Other coloured lights indicate that the chief operator wishes to send out a general order and wishes all operators to listen.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L021",
+   "text": "Another indicates that there is trouble somewhere on the line which needs the attention of the wire chief and repair department.",
+   "origin": "open",
+   "source": {
+    "book_id": "11368",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/11368"
+   }
+  },
+  {
+   "id": "L022",
+   "text": "If you have now guessed the common name of this giant, we will call him Steam.",
+   "origin": "open",
+   "source": {
+    "book_id": "19533",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/19533"
+   }
+  },
+  {
+   "id": "L023",
+   "text": "At the time James Watt lived, there were no steam boats, steam mills, nor railways.",
+   "origin": "open",
+   "source": {
+    "book_id": "19533",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/19533"
+   }
+  },
+  {
+   "id": "L024",
+   "text": "And this boy, though his grandmother scolded, thought much about the giant in the tea-kettle.",
+   "origin": "open",
+   "source": {
+    "book_id": "19533",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/19533"
+   }
+  },
+  {
+   "id": "L025",
+   "text": "And he became the inventor of the first steam engine that was of any use to the world.",
+   "origin": "open",
+   "source": {
+    "book_id": "19533",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/19533"
+   }
+  },
+  {
+   "id": "L026",
+   "text": "So, little by little, people came to know that steam is a great, good giant.",
+   "origin": "open",
+   "source": {
+    "book_id": "19533",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/19533"
+   }
+  },
+  {
+   "id": "L027",
+   "text": "They tried in many different ways to make him useful.",
+   "origin": "open",
+   "source": {
+    "book_id": "19533",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/19533"
+   }
+  },
+  {
+   "id": "L028",
+   "text": "They wished very much to make him run a boat.",
+   "origin": "open",
+   "source": {
+    "book_id": "19533",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/19533"
+   }
+  },
+  {
+   "id": "L029",
+   "text": "One man tried to run his boat in a queer way.",
+   "origin": "open",
+   "source": {
+    "book_id": "19533",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/19533"
+   }
+  },
+  {
+   "id": "L030",
+   "text": "He made something like a duck's foot to push it through the water.",
+   "origin": "open",
+   "source": {
+    "book_id": "19533",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/19533"
+   }
+  },
+  {
+   "id": "L031",
+   "text": "Another moved his boat by forcing a stream of water in at the bow and out at the stern.",
+   "origin": "open",
+   "source": {
+    "book_id": "19533",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/19533"
+   }
+  },
+  {
+   "id": "L032",
+   "text": "He made his engine run a number of oars so as to paddle the boat forward.",
+   "origin": "open",
+   "source": {
+    "book_id": "19533",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/19533"
+   }
+  },
+  {
+   "id": "L033",
+   "text": "But he said, When I shall be forgotten, steam boats will run up the rivers and across the seas.",
+   "origin": "open",
+   "source": {
+    "book_id": "19533",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/19533"
+   }
+  },
+  {
+   "id": "L034",
+   "text": "Yellow Butterfly wriggled and pushed in his snug little green chrysalis and wished he could get out to see the world.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L035",
+   "text": "It was such a dainty green chrysalis with white wrinkles, that it seemed almost a pity to have it break.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L036",
+   "text": "Now he crawled out of the newly-opened doorway to take his first flight.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L037",
+   "text": "And just as they got big, and smooth, and dry, it grew dark, and Mr.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L038",
+   "text": "Butterfly had to crawl under a leaf to sleep.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L039",
+   "text": "The next morning, bright and early, he flew away to visit the flowers.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L040",
+   "text": "First he stopped to see the Daisies by the roadside.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L041",
+   "text": "They were all dancing in the wind, and their bright faces looked as cheerful as anyone could wish.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L042",
+   "text": "Butterfly, and wished him to stay all day with them.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L043",
+   "text": "He said; You are very kind, but I really couldn't think of doing it.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L044",
+   "text": "You must excuse my saying it, but I am surprised to think you will grow here.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L045",
+   "text": "It is very dusty and dry, and then there is no shade.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L046",
+   "text": "Butterfly shook his head very doubtfully, and then bade them a polite Good-morning, and flew away to call on the Cardinals.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L047",
+   "text": "It took a great deal of work to make the tent.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L048",
+   "text": "The rest of the time they were scattered around the tree feeding.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L049",
+   "text": "Of course there were some cold days when they stayed in.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L050",
+   "text": "When the weather was chilly they moved slowly and cared very little for food.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L051",
+   "text": "Sometimes he got it, because the others didn't want to have any trouble.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L052",
+   "text": "Sometimes he didn't get it, and then he was very sulky and disagreeable, even refusing to answer when he was spoken to.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L053",
+   "text": "The Snail sat there, and wondered and wondered that they did not come.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L054",
+   "text": "He kept thinking how he would like some of the new food for dinner, but there it ended.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L055",
+   "text": "He didn't want it enough to get it for himself.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L056",
+   "text": "The grass began to turn brown and dry, and, all in all, it was trying weather for Snails.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L057",
+   "text": "A few days after this there were exciting times in the Ant-hill.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L058",
+   "text": "Some of them were dead, and the rest were looking for food.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L059",
+   "text": "There they went to work to build a new home and make her their queen.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  },
+  {
+   "id": "L060",
+   "text": "Exactly what happened nobody knew, but suddenly it grew light, and some of them fell out of the house.",
+   "origin": "open",
+   "source": {
+    "book_id": "34943",
+    "license": "Public Domain (Project Gutenberg)",
+    "url": "https://www.gutenberg.org/ebooks/34943"
+   }
+  }
+ ]
+}
