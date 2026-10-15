@@ -442,6 +442,20 @@ function migrateExamCfg() {
     if (!LS.get('mybank:' + id, null)) LS.set('mybank:' + id, my);
     LS.set('mybank', null);
   }
+  /* 生词本和打卡原来是不分考试的（一份全局的）。
+     现在全按考试分了 —— 老数据搬到"当时选的那场考试"名下，别让它凭空消失。 */
+  const v = LS.get('vocab', null);
+  if (Array.isArray(v) && v.length) {
+    const id = (old && old.id && EXAMS_BY_ID[old.id]) ? old.id : DEFAULT_EXAM_ID;
+    if (!LS.get('vocab:' + id, null)) LS.set('vocab:' + id, v);
+    LS.set('vocab', null);
+  }
+  const d = LS.get('days', null);
+  if (Array.isArray(d) && d.length) {
+    const id = (old && old.id && EXAMS_BY_ID[old.id]) ? old.id : DEFAULT_EXAM_ID;
+    if (!LS.get('days:' + id, null)) LS.set('days:' + id, d);
+    LS.set('days', null);
+  }
 }
 
 /* 当前考试信息。日期：使用者填过就用他填的，否则用考试自带的（可能为空）。
@@ -560,20 +574,27 @@ const LS = {
   }
 };
 
-/* ---------- 「这场考试的做题记录」----------
-   这三样都必须**按考试分开**，否则换考试会留下上一场的痕迹：
-     stats  首页的"累计答题 / 正确率"
+/* ---------- 「这场考试自己的数据」----------
+   ⚠️ 全部必须**按考试分开**，否则换考试就会留下上一场的痕迹。
+      用户的要求原话是"这些考试都应该有自己独立的东西，
+      不要出现不该混着用的东西"，首页那四块统计（连续打卡 / 累计答题 /
+      正确率 / 错题·生词）一个都不能串。
+     stats  累计答题 / 正确率
      wrong  错题本
      marks  划线和排除选项
-   ⚠️ 生词本（vocab）和打卡（days）**不**在这里面 ——
-      背过的词、坚持的天数是跨考试积累的，换考试不该清零。 */
+     vocab  生词本（连复习排期一起）
+     days   打卡
+   ⚠️ 注意：最早我把生词本和打卡当成"跨考试积累的"故意没分开，
+      但那样一换考试，首页数字就还是上一场的 —— 用户明确要求全部独立。 */
 let stats = { ans: 0, right: 0 };
 let wrong = [];
 let marks = {};
+let vocab = [];
+let days = [];
 function scopeKeys() {
   const id = curExam().id;
   return { stats: 'stats:' + id, wrong: 'wrong:' + id, marks: 'marks:' + id,
-           prog: 'prog:' + id };
+           prog: 'prog:' + id, vocab: 'vocab:' + id, days: 'days:' + id };
 }
 let scopedFor = null;      // 当前内存里这几样是给哪场考试装的
 /* ⚠️ 自愈：只要发现当前考试和内存里装的那套不一致，就重新装一遍。
@@ -586,6 +607,16 @@ function ensureExamScoped() {
   loadExamScoped();
   rebuildBank();             // 我导入的题目也按考试重筛
   importReport = null;       // 上一场考试的导入报告别跟过来
+  /* 下面这几样是**没落盘的内存状态**，换考试时必须一并丢掉：
+     ⚠️ draft 尤其危险 —— 它的 key 是「题型:第几题」，不带考试，
+        换考试后 key 照样对得上，于是**上一场没写完的答案会原样出现在
+        这一场的同一题上**。表现出来就是"我明明没做这题，怎么已经填好了"。
+     vQueue 是生词复习队列，拿着的是上一场那批词的引用。
+     spk 是口语计时器，不掐掉会一直在后台数秒并试图去画已经不在的时钟。 */
+  draft = null;
+  vQueue = [];
+  li = 0;
+  if (spk.t) { clearInterval(spk.t); spk.t = null; spk.phase = null; }
   scopedFor = id;
 }
 
@@ -595,6 +626,8 @@ function loadExamScoped() {
   wrong = LS.get(k.wrong, []) || [];
   marks = LS.get(k.marks, {}) || {};
   prog = LS.get(k.prog, {}) || {};
+  vocab = LS.get(k.vocab, []) || [];
+  days = LS.get(k.days, []) || [];
 }
 
 /* ---------- 练习范围：整套卷子 / 我的题目 ----------
@@ -675,8 +708,6 @@ function draftKey(typeId, i) { return 'draft:' + curExam().id + ':' + typeId + '
 function doneCountOf(typeId) {
   return LS.keys('ans:' + curExam().id + ':' + typeId + ':').length;
 }
-let vocab = LS.get('vocab', []);
-let days = LS.get('days', []);
 let prog = {};                          // type -> 当前第几篇（按考试存，见 loadExamScoped）
 
 const $ = s => document.querySelector(s);
@@ -868,12 +899,12 @@ document.addEventListener('click', e => {
 function addVocab(word, phon, mean) {
   if (vocab.some(v => v.word === word)) return;
   vocab.unshift({ word, phon, mean, t: today(), n: 0, due: today() });
-  LS.set('vocab', vocab);
+  LS.set(scopeKeys().vocab, vocab);
 }
 
 function markDay() {
   const d = today();
-  if (!days.includes(d)) { days.push(d); LS.set('days', days); }
+  if (!days.includes(d)) { days.push(d); LS.set(scopeKeys().days, days); }
 }
 
 function streak() {
@@ -1081,14 +1112,26 @@ const TYPE_DESC = {
           + '本站是英语训练台，这块没打算做。',
 };
 
+/* 底部导航的短标签。
+   ⚠️ 390px 宽的手机上，9 个格子每格只有约 43px，「仔细阅读」四个字放不下，
+      会被折成"仔细阅/读"两行，看着像坏了（真机截图里一眼就能看到）。
+      所以导航用短名，完整名字放进 title（长按/悬停能看到）；
+      「首页 → 这个考试要练什么」那种列表里仍旧用全名，那里有位置。 */
+const NAV_SHORT = {
+  careful: '阅读', matching: '匹配', cloze: '选词', single: '选择',
+  judge: '判断', listening: '听力', listen: '听写', quant: '数学',
+  gap: '填空', write: '写作', translate: '翻译', speak: '口语',
+};
+
 function navItems() {
   const items = [{ k: 'home', ic: '🏠', n: '首页' }];
   activeTypes().forEach(t => {
+    const full = (QTYPES[t] || {}).name || t;
     items.push({ k: 'type:' + t, ic: NAV_TYPE_ICON[t] || '📘',
-                 n: (QTYPES[t] || {}).name || t });
+                 n: NAV_SHORT[t] || full, title: full });
   });
-  items.push({ k: 'vocab', ic: '🔖', n: '生词' });
-  items.push({ k: 'me', ic: '📊', n: '我的' });
+  items.push({ k: 'vocab', ic: '🔖', n: '生词', title: '生词本' });
+  items.push({ k: 'me', ic: '📊', n: '我的', title: '我的' });
   return items;
 }
 
@@ -1099,7 +1142,7 @@ function renderNav() {
   const items = navItems();
   if (!items.some(x => x.k === route)) route = 'home';   // 当前页没了就回首页
   nav.innerHTML = items.map(x =>
-    `<button data-nav="${x.k}" class="${route === x.k ? 'on' : ''}">` +
+    `<button data-nav="${x.k}" class="${route === x.k ? 'on' : ''}" title="${esc(x.title || x.n)}">` +
     `<span class="ic">${x.ic}</span>${x.n}</button>`).join('');
   // 等宽由 CSS 的 grid-auto-columns: 1fr 保证，这里不用再切换样式
 }
@@ -1120,7 +1163,7 @@ function header() {
   const ei = examInfo();
   let title = ei.short, sub = ei.variantName
     ? ei.variantName + ' · 把今天的量做完就行' : '把今天的量做完就行';
-  if (route === 'vocab') { title = '生词本'; sub = '点短文里的词就能收藏'; }
+  if (route === 'vocab') { title = '生词本'; sub = ei.short + ' · 点短文里的词就能收藏'; }
   else if (route === 'me') { title = '我的'; sub = ''; }
   else if (route.indexOf('type:') === 0) {
     const id = route.slice(5);
@@ -1172,7 +1215,7 @@ function vHome() {
     <div class="stat"><div class="k">连续打卡</div><div class="v">${streak()} <small>天</small></div></div>
     <div class="stat"><div class="k">累计答题</div><div class="v">${total} <small>题</small></div></div>
     <div class="stat"><div class="k">正确率</div><div class="v">${acc}<small>%</small></div></div>
-    <div class="stat"><div class="k">生词 / 错题</div><div class="v">${vocab.length} <small>/ ${wrong.length}</small></div></div>
+    <div class="stat"><div class="k">错题 / 生词</div><div class="v">${wrong.length} <small>/ ${vocab.length}</small></div></div>
   </div>
 
   <div class="sec">这个考试要练什么</div>
@@ -1551,7 +1594,9 @@ function resultRow(t, i, total, done, d) {
 let draft = null;   // 当前作答草稿
 
 function ensureDraft(t, i) {
-  const key = t.type + ':' + i;
+  // ⚠️ key 里必须带考试：不带的话换考试后「仔细阅读:0」还是一样的 key，
+  //    内存里那份草稿会被当成"还是这一题"，上一场的作答就串过来了。
+  const key = curExam().id + ':' + t.type + ':' + i;
   if (!draft || draft.key !== key) {
     const saved = LS.get(draftKey(t.type, i), null);
     draft = { key, a: (saved && saved.a) || {}, p: (saved && saved.p) || {},
@@ -1561,7 +1606,10 @@ function ensureDraft(t, i) {
 }
 
 function vWrong() {
-  if (!wrong.length) return `<div class="card"><div class="empty">还没有错题。答错的内容会自动记到这里。</div></div>`;
+  if (!wrong.length) {
+    return `<div class="card"><div class="empty">「${esc(examShort())}」还没有错题。`
+      + `答错的内容会自动记到这里。</div></div>`;
+  }
   return `<div class="card">` + wrong.slice().reverse().map(w => `
     <div class="item">
       <div class="h">${esc(w.q)}</div>
@@ -1642,7 +1690,7 @@ function answerReview(ok) {
       vocab[i].n = 0;
       vocab[i].due = today();     // 今天还会再出现，直到你记住
     }
-    LS.set('vocab', vocab);
+    LS.set(scopeKeys().vocab, vocab);
   }
   if (ok) vRight++;
   vIdx++;
@@ -1680,14 +1728,17 @@ function vReviewCard() {
 }
 
 function vVocab() {
-  if (!vocab.length) return `<div class="card"><div class="empty">生词本还是空的。去阅读里点任意一个单词试试。</div>
-    <div class="row"><button class="btn" data-go="read">去阅读</button></div></div>`;
+  if (!vocab.length) {
+    return `<div class="card"><div class="empty">「${esc(examShort())}」的生词本还是空的。`
+      + `去阅读里点任意一个词试试（点一下就收藏）。</div>
+      <div class="row"><button class="btn" data-go="read">去阅读</button></div></div>`;
+  }
 
   if (vMode === 'review') return vReviewCard();
 
   const due = srsDueCount();
   return `<div class="card">
-    <div class="ttl">生词本</div>
+    <div class="ttl">生词本 · ${esc(examShort())}</div>
     <div class="meta">共 ${vocab.length} 个 · 今天待复习 <b>${due}</b> 个
       ${vocab.length - due ? ' · 已排期 ' + (vocab.length - due) + ' 个' : ''}</div>
     <div class="row" style="margin:12px 0 2px">
@@ -1708,7 +1759,7 @@ function vVocab() {
 function exportTSV() {
   const lines = ['#separator:tab', '#html:false'];
   for (const v of vocab) lines.push([v.word, v.phon || '', v.mean || '', '英语备考训练台'].join('\t'));
-  download('\ufeff' + lines.join('\n'), 'cet4_vocab.tsv', 'text/tab-separated-values;charset=utf-8');
+  download('\ufeff' + lines.join('\n'), '生词_' + examShort() + '.tsv', 'text/tab-separated-values;charset=utf-8');
 }
 
 /* 通用格式：带 BOM 的 CSV，Excel / 欧路词典 / 不背单词等大多能直接导入 */
@@ -1716,7 +1767,7 @@ function exportCSV() {
   const q = s => '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"';
   const lines = ['word,phonetic,meaning'];
   for (const v of vocab) lines.push([q(v.word), q(v.phon), q(v.mean)].join(','));
-  download('\ufeff' + lines.join('\r\n'), 'cet4_生词.csv', 'text/csv;charset=utf-8');
+  download('\ufeff' + lines.join('\r\n'), '生词_' + examShort() + '.csv', 'text/csv;charset=utf-8');
 }
 
 /* ---------- 我的题目（使用者自己导入，只存在他自己浏览器里） ----------
@@ -2440,6 +2491,15 @@ function ocrVerdict(data) {
   return { ok: true, text: text };
 }
 
+/* 识别引擎起不来时，说清**为什么** —— 大多数人是在单文件版里点图片，
+   光说"用不了"帮不上忙。 */
+function ocrWhyUnavailable(e) {
+  if (window.__INLINE_DATA__ || location.protocol === 'file:') {
+    return '单文件版里没有带识别引擎 —— 它有好几兆，塞不进一个 HTML 文件。';
+  }
+  return '识别引擎没加载起来（' + ((e && e.message) || '未知原因') + '），多半是网络把它拦住了。';
+}
+
 /* ---------- 一次把若干文件读成文字 ---------- */
 let importReport = null;   // 最近一次导入的结果（成功/失败都留在这儿给用户看）
 let myPanelOpen = false;
@@ -2465,8 +2525,9 @@ async function handleImportFiles(files) {
             + '。请重拍（正对、光线足、一页一张），或者用手机相册／微信的「提取文字」'
             + '把文字弄出来粘到下面。');
         } catch (e) {
-          problems.push(f.name + '：这个版本用不了站内识别（' + e.message
-            + '）。请用手机相册／微信的「提取文字」把文字取出来，粘到下面。');
+          problems.push(f.name + '：' + ocrWhyUnavailable(e)
+            + ' 请用手机相册／微信的「提取文字」把文字取出来，粘到下面；'
+            + '或者改用浏览器里的在线版（那里带了识别引擎）再传这张图。');
         }
         continue;
       }
@@ -2718,7 +2779,7 @@ function vMe() {
 
   ${vExamPick()}
 
-  <div class="sec">错题本</div>
+  <div class="sec">错题本 · ${esc(examShort())}</div>
   ${vWrong()}
 
   <div class="sec">我的题目</div>
@@ -3031,7 +3092,9 @@ document.addEventListener('change', e => {
 });
 
 /* 选文件 / 把文件拖进来 —— 走同一条路：先读成文字，再交给解析器。
-   全程在本机完成，不上传。 */
+   全程在本机完成，不上传。
+   拖到页面**任何地方**都收：浏览器默认会把拖进来的文件直接打开（离开本站），
+   与其那样不如接住 —— 顺手把「我的题目」面板打开，让人看见东西去哪了。 */
 document.addEventListener('change', e => {
   if (e.target && e.target.id === 'myfile') {
     const fs = e.target.files;
@@ -3042,20 +3105,24 @@ document.addEventListener('change', e => {
   }
 });
 ['dragenter', 'dragover'].forEach(ev => document.addEventListener(ev, e => {
+  if (!e.dataTransfer || Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') < 0) return;
+  e.preventDefault();                       // 不加这行浏览器会直接打开文件
   const d = e.target.closest && e.target.closest('#mydrop');
-  if (!d) return;
-  e.preventDefault();
-  d.classList.add('over');
+  if (d) d.classList.add('over');
 }));
 ['dragleave', 'drop'].forEach(ev => document.addEventListener(ev, e => {
+  if (!e.dataTransfer) return;
   const d = e.target.closest && e.target.closest('#mydrop');
-  if (!d) return;
+  if (d) d.classList.remove('over');
+  if (!e.dataTransfer.files || !e.dataTransfer.files.length) return;
+  if (ev === 'dragleave') return;
   e.preventDefault();
-  d.classList.remove('over');
-  if (ev === 'drop' && e.dataTransfer && e.dataTransfer.files.length) {
-    importReport = null;
-    handleImportFiles(e.dataTransfer.files);
-  }
+  importReport = null;
+  if (d) { handleImportFiles(e.dataTransfer.files); return; }
+  // 拖在面板外面：先把「我的题目」面板打开，再导
+  myPanelOpen = true;
+  if (route !== 'me' && !onboarding) { route = 'me'; render(); }
+  setTimeout(() => handleImportFiles(e.dataTransfer.files), 60);
 }));
 
 function submitRead(t, i, d) {
@@ -3422,7 +3489,9 @@ document.addEventListener('click', e => {
     return;
   }
   if (e.target.closest('[data-clearvocab]')) {
-    if (confirm('清空生词本？')) { vocab = []; LS.set('vocab', vocab); render(); } return;
+    if (confirm('清空「' + examShort() + '」的生词本？（其它考试和其它数据不受影响）')) {
+      vocab = []; LS.set(scopeKeys().vocab, vocab); render();
+    } return;
   }
   if (e.target.closest('[data-clearwrong]')) {
     if (confirm('清空错题本？')) {
@@ -3430,10 +3499,23 @@ document.addEventListener('click', e => {
     } return;
   }
   if (e.target.closest('[data-resetall]')) {
-    if (confirm('清空全部本地数据？错题、生词、打卡、答题记录都会没。')) {
+    if (confirm('清空全部本地数据？答题记录、错题、生词、打卡、'
+      + '你自己导入的题目、以及选的考试，都会没。')) {
       Object.keys(localStorage).filter(k => k.startsWith('cet4:')).forEach(k => localStorage.removeItem(k));
-      wrong = []; vocab = []; days = []; prog = {}; stats = { ans: 0, right: 0 }; draft = null;
+      /* ⚠️ 光清 localStorage 不够 —— 内存里的 marks（划线）、prog、
+         我导入的题目、错题都还原样挂着，页面上看着像"没清干净"。
+         scopedFor 置空 → 下一次 render 会把这一整套重新装载一遍。 */
+      scopedFor = null;
+      draft = null;
+      vQueue = [];
+      // 连"选了哪场考试"都没了，那就回到选考试那一屏，别把人留在空页面上
+      onboarding = true;
+      onboardStep = 0;
+      onboardExam = null;
+      onboardVariant = null;
+      route = 'home';
       render();
+      toast('已清空，重新选一个考试吧');
     } return;
   }
 });

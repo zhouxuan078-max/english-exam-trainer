@@ -296,10 +296,14 @@ select {
 .item:last-child { border-bottom: 0; }
 .item .h { font-size: 14.5px; margin-bottom: 3px; }
 .item .m { font-size: 12px; color: var(--fg2); }
-.vlist .v { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.vlist .v { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
 .vlist .v:last-child { border-bottom: 0; }
 .vlist .v b { color: var(--brand); flex: 0 0 auto; }
-.vlist .v span { font-size: 13px; color: var(--fg2); text-align: right; }
+/* ⚠️ 两处都不能省：不加 min-width:0，flex 子项按内容宽度算，长释义会直接
+   冲出卡片、被屏幕右边裁掉（生词本里一屏全是半截释义就是这个原因）。
+   加上之后让它换行显示，宁可占两行也别把字裁了。 */
+.vlist .v span { font-size: 13px; color: var(--fg2); text-align: right;
+                 min-width: 0; overflow-wrap: anywhere; }
 .empty { color: var(--fg3); font-size: 13.5px; padding: 14px 0; text-align: center; }
 
 /* 听力 */
