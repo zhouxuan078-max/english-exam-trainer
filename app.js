@@ -622,23 +622,42 @@ function vHome() {
     <div class="stat"><div class="k">生词 / 错题</div><div class="v">${vocab.length} <small>/ ${wrong.length}</small></div></div>
   </div>
 
-  <div class="sec">开始练</div>
+  <div class="sec">这个考试要练什么</div>
   <div class="entry">
-    <a href="#read" data-go="read"><div class="n">📖 阅读</div><div class="d">${nRead} 篇 · 三种题型</div></a>
-    <a href="#listen" data-go="listen"><div class="n">🎧 听力</div><div class="d">${S.listen ? S.listen.items.length : 0} 句听写</div></a>
+    ${examInfo().types.map(t => {
+      const q = QTYPES[t] || {};
+      const bt = S.bank && S.bank.types.find(x => x.type === t);
+      const n = bt ? bt.items.length
+        : (t === 'listen' && S.listen ? S.listen.items.length : 0);
+      const d = !q.impl ? '还没做'
+        : (n ? (n + ' ' + (q.unit || '篇')) : '还没有题目');
+      return `<a href="#type:${t}" data-go="type:${t}">
+        <div class="n">${NAV_TYPE_ICON[t] || '📘'} ${esc(q.name || t)}</div>
+        <div class="d">${d}</div></a>`;
+    }).join('')}
     <a href="#vocab" data-go="vocab"><div class="n">🔖 生词本</div><div class="d">${vocab.length} 个词${srsDueCount() ? ' · 待复习 ' + srsDueCount() : ''}</div></a>
     <a href="#me" data-go="me"><div class="n">📊 我的</div><div class="d">错题 ${wrong.length} 条</div></a>
   </div>
 
-  <div class="sec">今天做什么</div>
-  <div class="card tight">
-    <div style="font-size:14px;line-height:1.9">
-      1. <b>仔细阅读 1 篇</b>（8 分钟）— 分值最高，每题 14.2 分<br>
-      2. <b>听力听写 5 句</b>（6 分钟）— 练耳朵<br>
-      3. <b>选词填空 1 篇</b>（8 分钟）— 最后做，别恋战<br>
-      4. ${srsDueCount() ? `<b>复习生词 ${srsDueCount()} 个</b>（约 ${Math.max(2, Math.round(srsDueCount() * 0.25))} 分钟）— 在「生词本」里` : '做完把生词收藏，明天就会出现在复习队列里'}
-    </div>
-  </div>`;
+  ${(() => {
+    // 只列"这个考试有、而且真的有题目"的题型；一个都没有就整块不显示
+    const impl = examInfo().types.filter(t => (QTYPES[t] || {}).impl);
+    const cnt = t => {
+      const bt = S.bank && S.bank.types.find(x => x.type === t);
+      return bt ? bt.items.length
+        : (t === 'listen' && S.listen ? S.listen.items.length : 0);
+    };
+    const lines = impl.filter(t => cnt(t) > 0).map(t => {
+      const q = QTYPES[t] || {};
+      return `<b>${esc(q.name || t)} 1 ${q.unit || '篇'}</b>`;
+    }).slice(0, 3);
+    if (srsDueCount()) lines.push(`<b>复习生词 ${srsDueCount()} 个</b>（在「生词本」里）`);
+    if (!lines.length) return '';
+    return `<div class="sec">今天做什么</div>
+      <div class="card tight"><div style="font-size:14px;line-height:1.9">
+        ${lines.map((x, i) => (i + 1) + '. ' + x).join('<br>')}
+      </div></div>`;
+  })()}`;
 }
 
 /* ---------- 阅读 ---------- */
