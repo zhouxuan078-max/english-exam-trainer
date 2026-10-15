@@ -26,21 +26,27 @@ const APP_NAME = '英语备考训练台';
    ==================================================== */
 
 const QTYPES = {
-  /* —— 已实现 —— */
-  careful:   { name: '仔细阅读', impl: true,  unit: '篇' },
-  matching:  { name: '长篇匹配', impl: true,  unit: '篇' },
-  cloze:     { name: '选词填空', impl: true,  unit: '篇' },
-  listen:    { name: '听力听写', impl: true,  unit: '句' },
-  single:    { name: '单项选择', impl: true,  unit: '组' },
-  judge:     { name: '判断题',   impl: true,  unit: '组' },
-  listening: { name: '听力理解', impl: true,  unit: '组' },
-  quant:     { name: '数学',     impl: true,  unit: '组' },
-  /* —— 还没实现 —— */
-  gap:       { name: '填空题',   impl: false, unit: '题' },
-  write:     { name: '写作',     impl: false, unit: '篇' },
-  translate: { name: '翻译',     impl: false, unit: '题' },
-  speak:     { name: '口语',     impl: false, unit: '题' },
+  careful:   { name: '仔细阅读', impl: true, unit: '篇' },
+  matching:  { name: '长篇匹配', impl: true, unit: '篇' },
+  cloze:     { name: '选词填空', impl: true, unit: '篇' },
+  listen:    { name: '听力听写', impl: true, unit: '句' },
+  single:    { name: '单项选择', impl: true, unit: '组' },
+  judge:     { name: '判断题',   impl: true, unit: '组' },
+  listening: { name: '听力理解', impl: true, unit: '组' },
+  quant:     { name: '数学',     impl: true, unit: '组' },
+  gap:       { name: '填空题',   impl: true, unit: '篇' },
+  write:     { name: '写作',     impl: true, unit: '篇' },
+  translate: { name: '翻译',     impl: true, unit: '篇' },
+  speak:     { name: '口语',     impl: true, unit: '组' },
 };
+
+/* ⚠️ 现在**每一种题型都有内容**，界面上不再有"还没做"这个状态。
+   一种题型要么有题，要么显示"还没有题目"（去导入）。
+   impl 这个标记保留着，是为了将来真加新题型时能挡住半成品。 */
+
+/* 开放式作答：写 / 译 / 说 —— 没法自动判分，提交后给参考内容自己对照。
+   这几类不进正确率统计，只记打卡。 */
+const OPEN_TYPES = ['write', 'translate', 'speak'];
 
 /* 这四种题型共用同一个答题界面：材料（可无）+ 若干道带选项的小题。
    判断题的 T/F/NG、GRE 数量比较的四个固定选项，都是"选项写在题目上"，
@@ -423,7 +429,8 @@ function examInfo() {
 
 function examShort() { return examInfo().short || '考试'; }
 
-/* 这个考试里"已经能用"和"还没做"的题型 */
+/* 这个考试里的题型（implTypes / missingTypes 现在都返回全部 / 空，
+   留着是为了将来加半成品题型时还能挡住） */
 function implTypes(id) {
   const ex = EXAMS_BY_ID[id || examInfo().id] || {};
   return typesOf(ex).filter(t => (QTYPES[t] || {}).impl);
@@ -517,8 +524,15 @@ function vExamPick() {
 const S = { bank: null, dict: null, listen: null };
 const LS = {
   get(k, d) { try { const v = localStorage.getItem('cet4:' + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
-  set(k, v) { try { localStorage.setItem('cet4:' + k, JSON.stringify(v)); } catch (e) {} }
+  set(k, v) { try { localStorage.setItem('cet4:' + k, JSON.stringify(v)); } catch (e) {} },
+  keys(prefix) {
+    try { return Object.keys(localStorage).filter(k => k.indexOf('cet4:' + prefix) === 0); }
+    catch (e) { return []; }
+  }
 };
+
+/* 某个题型已经做了多少条（提交过的条目才会留下 ans:<题型>:<序号>） */
+function doneCountOf(typeId) { return LS.keys('ans:' + typeId + ':').length; }
 let wrong = LS.get('wrong', []);
 let vocab = LS.get('vocab', []);
 let days = LS.get('days', []);
@@ -652,8 +666,6 @@ function wordPopHtml(raw, hit) {
   const lw = raw.toLowerCase();
   const key = (hit ? hit.word : lw).toLowerCase();
   const inVocab = vocab.some(v => v.word === key);
-  const ctx = curReadItem();
-  const ulOn = ctx ? (((marks[ctx.key] || {}).w) || []).indexOf(lw) >= 0 : false;
   const head = hit
     ? `<b>${esc(hit.word)}</b> ${hit.p ? '<span style="opacity:.7">/' + esc(hit.p) + '/</span>' : ''}
        <div style="margin-top:4px">${esc(hit.m || '（暂无释义）')}</div>`
@@ -661,25 +673,13 @@ function wordPopHtml(raw, hit) {
   const addBtn = inVocab
     ? `<button class="sec" disabled>已在生词本</button>`
     : `<button data-add="${esc(key)}|${esc(hit ? (hit.p || '') : '')}|${esc(hit ? (hit.m || '') : '')}">加入生词本</button>`;
-  const ulBtn = ctx
-    ? `<button class="sec" data-markw="${esc(lw)}">${ulOn ? '取消划线' : '划线'}</button>`
-    : '';
-  return head + `<div class="add">${addBtn}${ulBtn}<button class="sec" data-close="1">关闭</button></div>`;
+  return head + `<div class="add">${addBtn}<button class="sec" data-close="1">关闭</button></div>`;
 }
 
 document.addEventListener('click', e => {
-  /* 划线 / 取消划线 */
-  const mk = e.target.closest('[data-markw]');
-  if (mk) {
+  if (e.target.closest('[data-clearul]')) {
     const ctx = curReadItem();
-    if (ctx) {
-      const w = mk.dataset.markw;
-      const on = toggleWordMark(ctx.key, w);
-      document.querySelectorAll('.w[data-w]').forEach(x => {
-        if ((x.dataset.w || '').toLowerCase() === w) x.classList.toggle('ul', on);
-      });
-      mk.textContent = on ? '取消划线' : '划线';
-    }
+    if (ctx) { clearRangeMarks(ctx.key); render(); toast('已清除划线'); }
     return;
   }
   const b = e.target.closest('[data-add]');
@@ -731,8 +731,11 @@ function wrap(text) {
 }
 
 /* ---------- 做题时的标记：划线 / 排除选项 ----------
-   按"题型:题目id"分开存，重渲染不会丢，也不会串到别的题上。 */
-let marks = LS.get('marks', {});    // { 'careful:xxx': { w:['word'], o:['0:2'] } }
+   按"题型:题目id"分开存，重渲染不会丢，也不会串到别的题上。
+
+   划线存的是**字符区间** [{s, e}]（相对短文纯文本的偏移），不是"哪个词" ——
+   所以可以自由选一段话划上，而不是只能一个个词点。 */
+let marks = LS.get('marks', {});    // { 'careful:xxx': { r:[{s,e}], o:['0:2'] } }
 
 function curReadItem() {
   if (route.indexOf('type:') !== 0) return null;
@@ -745,18 +748,24 @@ function curReadItem() {
 }
 
 function getMarks(key) {
-  if (!marks[key]) marks[key] = { w: [], o: [] };
-  if (!Array.isArray(marks[key].w)) marks[key].w = [];
+  if (!marks[key]) marks[key] = { r: [], o: [] };
+  if (!Array.isArray(marks[key].r)) marks[key].r = [];
   if (!Array.isArray(marks[key].o)) marks[key].o = [];
   return marks[key];
 }
 
-function toggleWordMark(key, word) {
+/* 选一段 → 划上；再选一模一样的一段 → 取消。
+   区间按字符偏移存，重渲染后靠 applyMarks 逐词回填 .ul。 */
+function toggleRangeMark(key, s, e) {
   const m = getMarks(key);
-  const i = m.w.indexOf(word);
-  if (i >= 0) m.w.splice(i, 1); else m.w.push(word);
+  const idx = m.r.findIndex(r => r.s === s && r.e === e);
+  if (idx >= 0) m.r.splice(idx, 1); else m.r.push({ s: s, e: e });
   LS.set('marks', marks);
-  return i < 0;                     // true = 现在划上了
+  return idx < 0;
+}
+function clearRangeMarks(key) {
+  getMarks(key).r = [];
+  LS.set('marks', marks);
 }
 
 function toggleOptMark(key, pick) {
@@ -773,11 +782,28 @@ function applyMarks() {
   document.querySelectorAll('.w[data-w]').forEach(el => {
     const w = (el.dataset.w || '').toLowerCase();
     if (vocab.some(v => v.word === w)) el.classList.add('saved');
-    if (ctx) {
-      const m = marks[ctx.key];
-      if (m && m.w.indexOf(w) >= 0) el.classList.add('ul');
-    }
   });
+  // 划线：把存的字符区间换算成"哪些可点词落在区间里"，逐词加 .ul
+  if (ctx) {
+    const rs = ((marks[ctx.key] || {}).r) || [];
+    if (rs.length) {
+      document.querySelectorAll('.passage').forEach(el => {
+        let pos = 0;
+        const walk = node => {
+          if (node.nodeType === 3) { pos += node.nodeValue.length; return; }
+          if (node.nodeType !== 1) return;
+          if (node.classList.contains('w')) {
+            const len = node.textContent.length;
+            if (rs.some(r => r.s < pos + len && r.e > pos)) node.classList.add('ul');
+            pos += len;
+            return;
+          }
+          Array.prototype.forEach.call(node.childNodes, walk);
+        };
+        Array.prototype.forEach.call(el.childNodes, walk);
+      });
+    }
+  }
   if (!ctx) return;
   const m = marks[ctx.key];
   if (!m) return;
@@ -788,7 +814,6 @@ function applyMarks() {
 
 /* ---------- 路由 ---------- */
 let route = 'home', readType = 'careful';
-let helpOpen = false;      // 右上角「!」展开的说明面板
 let onboarding = false;    // 首次进来：先选考试
 let onboardReturn = 'home'; // 从哪一页点进"选考试"的，返回时退回去
 let onboardStep = 0;        // 0 = 列考试；1 = 确认页（方向 + 日期 + 试卷结构）
@@ -804,14 +829,14 @@ function go(r) {
 
 /* 底部导航 = 首页 + 这个考试的【全部】题型 + 生词 + 我的。
    注意：**包括还没实现的题型** —— 让人一眼看到这个考试完整长什么样，
-   点进去会说明它是什么、为什么还没做。题型多时导航横向滚动。 */
+   点进去都能做题。题型多时导航横向滚动。 */
 const NAV_TYPE_ICON = {
   careful: '📄', matching: '🧩', cloze: '✏️', listen: '🎧',
   single: '🔤', listening: '🔊', judge: '⚖️', gap: '⬜',
   write: '✍️', translate: '🈶', speak: '🗣️', quant: '➗',
 };
 
-/* 每个题型一句话说清它是什么（"还没做"的页面靠它解释） */
+/* 每个题型一句话说清它是什么（点进去还没有题目时靠它解释） */
 const TYPE_DESC = {
   careful:  '仔细阅读：一篇短文 + 若干道选择题。',
   matching: '长篇匹配：几段文字，把句子配到对应段落。',
@@ -822,10 +847,11 @@ const TYPE_DESC = {
   listening: '听力理解：先播一段录音，再回答后面的选择题。'
            + '站里用的是浏览器语音合成，不是考场原音。',
   judge:    '判断题：判断每句话和原文是「一致 / 相反 / 没提到」（雅思的 T/F/NG）。',
-  gap:      '填空题：空格里的词自己写，不从选项里挑。',
-  write:    '写作：给一个题目，你写一篇短文（四六级是 120~180 词的短文写作，占 15%）。需要批改评分，自动判分很难。',
-  translate: '翻译：给一段中文，翻译成英文。四六级考的是汉译英段落翻译，占 15%，同样需要批改。',
-  speak:    '口语：要录音和评分，网页里做不完整，放最后。',
+  gap:      '填空题：短文里挖掉若干个词，自己打字填回去，判分时会忽略大小写和标点。',
+  write:    '写作：给一个题目，你写一篇短文。写完后对照参考范文 —— 没有自动评分，自己看差距。',
+  translate: '翻译：给一段中文（或英文），你来译。提交后给参考译文对照。',
+  speak:    '口语：给题目和要点，自己先说一遍，再对照参考回答。',
+  quant:    '数学：GRE 的数量推理（数量比较 / 单选 / 数值填空）。',
   quant:    '数学：GRE 的数量推理部分（数量比较 / 单选 / 数值填空）。'
           + '本站是英语训练台，这块没打算做。',
 };
@@ -871,19 +897,19 @@ function header() {
   let title = ei.short, sub = ei.variantName
     ? ei.variantName + ' · 把今天的量做完就行' : '把今天的量做完就行';
   if (route === 'vocab') { title = '生词本'; sub = '点短文里的词就能收藏'; }
-  else if (route === 'me') { title = '我的'; sub = '数据都在你自己手机上'; }
+  else if (route === 'me') { title = '我的'; sub = ''; }
   else if (route.indexOf('type:') === 0) {
     const id = route.slice(5);
     const q = QTYPES[id] || {};
     title = q.name || id;
     const t = S.bank && S.bank.types.find(x => x.type === id);
-    if (!q.impl) sub = '这个题型还没做';
-    else if (id === 'listen') sub = '浏览器朗读，跟读默写';
+    if (id === 'listen') sub = '浏览器朗读，跟读默写';
     else if (!t || !t.items.length) sub = '还没有题目';
     else {
       const perQ = scorePerQOf(id);
       sub = t.items.length + ' ' + ((QTYPES[id] || {}).unit || '篇')
-        + (perQ ? ' · 每题 ' + (+perQ.toFixed(2)) + ' 分' : '');
+        + (perQ ? ' · 每' + ((QTYPES[id] || {}).unit || '题')
+          + ' ' + (+perQ.toFixed(2)) + ' 分' : '');
     }
   }
   $('#hdTitle').textContent = title;
@@ -932,8 +958,7 @@ function vHome() {
       const bt = S.bank && S.bank.types.find(x => x.type === t);
       const n = bt ? bt.items.length
         : (t === 'listen' && S.listen ? S.listen.items.length : 0);
-      const d = !q.impl ? '还没做'
-        : (n ? (n + ' ' + (q.unit || '篇')) : '还没有题目');
+      const d = n ? (n + ' ' + (q.unit || '篇')) : '还没有题目';
       return `<a href="#type:${t}" data-go="type:${t}">
         <div class="n">${NAV_TYPE_ICON[t] || '📘'} ${esc(q.name || t)}</div>
         <div class="d">${d}</div></a>`;
@@ -942,25 +967,23 @@ function vHome() {
     <a href="#me" data-go="me"><div class="n">📊 我的</div><div class="d">错题 ${wrong.length} 条</div></a>
   </div>
 
-  ${(() => {
-    // 只列"这个考试有、而且真的有题目"的题型；一个都没有就整块不显示
-    const impl = examInfo().types.filter(t => (QTYPES[t] || {}).impl);
-    const cnt = t => {
-      const bt = S.bank && S.bank.types.find(x => x.type === t);
-      return bt ? bt.items.length
-        : (t === 'listen' && S.listen ? S.listen.items.length : 0);
-    };
-    const lines = impl.filter(t => cnt(t) > 0).map(t => {
-      const q = QTYPES[t] || {};
-      return `<b>${esc(q.name || t)} 1 ${q.unit || '篇'}</b>`;
-    }).slice(0, 3);
-    if (srsDueCount()) lines.push(`<b>复习生词 ${srsDueCount()} 个</b>（在「生词本」里）`);
-    if (!lines.length) return '';
-    return `<div class="sec">今天做什么</div>
-      <div class="card tight"><div style="font-size:14px;line-height:1.9">
-        ${lines.map((x, i) => (i + 1) + '. ' + x).join('<br>')}
-      </div></div>`;
-  })()}`;
+  <div class="sec">各题型做了多少</div>
+  <div class="card tight">
+    <div class="vlist">
+      ${examInfo().types.map(t => {
+        const q = QTYPES[t] || {};
+        const bt = S.bank && S.bank.types.find(x => x.type === t);
+        const total = bt ? bt.items.length
+          : (t === 'listen' && S.listen ? S.listen.items.length : 0);
+        const dn = doneCountOf(t);
+        return `<div class="v">
+          <span>${NAV_TYPE_ICON[t] || '📘'} ${esc(q.name || t)}</span>
+          <b${dn ? '' : ' style="color:var(--fg3)"'}>${dn} / ${total} ${esc(q.unit || '篇')}</b>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
+
 }
 
 /* ---------- 阅读 ---------- */
@@ -970,8 +993,6 @@ function setState(type, i) { prog[type] = i; LS.set('prog', prog); }
 /* ---------- 题型页 ----------
    路由是 type:<题型id>。已实现的渲染题目；没实现的给一个说明页。 */
 function vTypePage(id) {
-  const q = QTYPES[id] || {};
-  if (!q.impl) return vComingSoon(id);
   if (id === 'listen') return vListen();
   const t = S.bank && S.bank.types.find(x => x.type === id);
   if (!t || !t.items.length) return vTypeEmpty(id);
@@ -986,22 +1007,6 @@ function vTypeEmpty(id) {
     <div class="meta" style="margin-top:6px">${esc(TYPE_DESC[id] || '')}</div>
     <div class="empty">这个题型还没有题目。</div>
     <div class="row"><button class="btn" data-go="me">去「我的题目」导入</button></div>
-  </div>`;
-}
-
-function vComingSoon(id) {
-  const q = QTYPES[id] || {};
-  const cur = examInfo();
-  return `<div class="card">
-    <div class="ttl">${esc(q.name || id)}
-      <span class="tag" style="margin-left:6px;background:var(--warn-soft);color:var(--warn);border-color:transparent">还没做</span>
-    </div>
-    <div class="meta" style="margin-top:8px">${esc(TYPE_DESC[id] || '')}</div>
-  </div>
-  <div class="card tight">
-    <div class="meta">这个题型还在开发中，所以选 <b>${esc(cur.name)}</b> 时，
-      它暂时只能出现在导航里、点不进去刷题。
-      去「我的 → 我的考试」能看到这个考试还缺哪几种题型。</div>
   </div>`;
 }
 
@@ -1025,13 +1030,19 @@ function vItem(t, i) {
   const submitted = LS.get('ans:' + t.type + ':' + i, null);
   const done = !!submitted;
   // 关键：未提交时要用"作答草稿"渲染，否则点了选项界面不会显示选中
-  const d = done ? { a: submitted.a || {}, p: submitted.p || {} } : ensureDraft(t, i);
+  const d = done
+    ? { a: submitted.a || {}, p: submitted.p || {}, x: submitted.x || {} }
+    : ensureDraft(t, i);
   const per = scorePerQOf(t.type);
   let h = `<div class="card">
     <div class="ttl">${esc(it.title || '（无标题）')}</div>
     <div class="meta">${originTag(it)}第 ${i + 1} / ${t.items.length} ${
       esc((QTYPES[t.type] || {}).unit || '篇')}${
-      per ? ' · 每题 ' + (+per.toFixed(2)) + ' 分' : ''}</div>
+      per ? ' · 每' + ((QTYPES[t.type] || {}).unit || '题')
+        + ' ' + (+per.toFixed(2)) + ' 分' : ''}${
+      ((marks[readType + ':' + it.id] || {}).r || []).length
+        ? ` · <button class="btn ghost sm" data-clearul="1"
+             style="padding:1px 8px;font-size:11px">清除划线</button>` : ''}</div>
     ${srcLine(it)}`;
 
   if (t.type === 'careful' || CHOICE_TYPES.indexOf(t.type) >= 0) {
@@ -1064,6 +1075,59 @@ function vItem(t, i) {
       h += `<div class="exp" style="margin-top:12px"><b>听力原文</b><br>${esc(it.script)}</div>`;
     }
     h += resultRow(t, i, it.questions.length, done, d);
+  } else if (t.type === 'gap') {
+    const placed = d.p || {};
+    h += `<div class="passage">${gapBody(it, placed, done)}</div>`;
+    if (done) {
+      h += `<div class="exp" style="margin-top:12px">`;
+      Object.keys(it.answers).forEach(n => {
+        const right = it.answers[n], got = placed[n] || '';
+        const ok = normAns(got) === normAns(right);
+        h += `<div>${n}. ${ok ? '✓' : '✗'} ${esc(got || '未填')}${
+          ok ? '' : ' → 应为 <b>' + esc(right) + '</b>'}`;
+        if (it.explains && it.explains[n]) {
+          h += `<div style="color:var(--fg2);font-size:12.5px">${esc(it.explains[n])}</div>`;
+        }
+        h += `</div>`;
+      });
+      h += `</div>`;
+    }
+    h += resultRow(t, i, Object.keys(it.answers).length, done, d);
+  } else if (OPEN_TYPES.indexOf(t.type) >= 0) {
+    const myText = (d.x && d.x.text) || '';
+    const isTr = t.type === 'translate';
+    // ⚠️ 字段名叫 material，不能叫 source —— 构建脚本会给每条题目写一个
+    //    版权来源对象 it.source = {license, desc}，用同名会把正文覆盖成 [object Object]
+    const material = it.material || it.prompt || '';
+    h += `<div class="passage" style="font-size:16px;line-height:1.85">${
+      isTr ? esc(material) : '<b>' + esc(material) + '</b>'}</div></div><div class="card">`;
+    if (!done) {
+      h += `<textarea id="openin" class="big" rows="9"
+        placeholder="${isTr ? '在这里写你的译文…' : (t.type === 'speak' ? '把自己说的写下来（方便对照）…' : '在这里写你的作文…')}"
+        >${esc(myText)}</textarea>
+        <div class="meta" style="margin-top:6px" id="wc">${
+          isTr ? cc(myText) + ' 字' : wc(myText) + ' 词'}</div>`;
+    } else {
+      h += `<div class="sub"><div class="meta">你的作答</div>
+        <div style="white-space:pre-wrap;line-height:1.8">${esc(myText) || '<i>（空）</i>'}</div></div>`;
+    }
+    h += resultRow(t, i, 0, done, d);
+    if (done) {
+      const refKey = isTr ? 'reference' : 'sample';
+      const ref = it[refKey] || '';
+      if (it.points && it.points.length) {
+        h += `<div class="exp" style="margin-top:12px"><b>对照要点</b>
+          <ul style="margin:6px 0 0 18px;padding:0">${
+            it.points.map(x => '<li>' + esc(x) + '</li>').join('')}</ul></div>`;
+      }
+      if (ref) {
+        h += `<div class="exp" style="margin-top:12px">
+          <b>${isTr ? '参考译文' : '参考范文'}</b>
+          ${t.type === 'speak' ? ` <button class="btn ghost sm" data-playsample="1"
+            style="margin-left:6px;padding:2px 10px">▶ 听一遍</button>` : ''}
+          <div style="white-space:pre-wrap;line-height:1.85;margin-top:6px">${esc(ref)}</div></div>`;
+      }
+    }
   } else if (t.type === 'matching') {
     h += it.paragraphs.map(p => `<div class="para"><span class="lt">${p.letter}</span>${wrap(p.text)}</div>`).join('');
     h += `</div><div class="card"><div class="qt" style="margin-bottom:10px">把下面每句话匹配到对应段落（部分段落不对应任何句子）</div>`;
@@ -1103,6 +1167,53 @@ function vItem(t, i) {
   return h;
 }
 
+/* 一条题目里有多少个"待答的小项"。
+   ⚠️ 一定要按题型分别取：cloze / gap 的条目**没有 questions 字段**，
+      开放式（写/译/说）也没有 —— 统一在这里兜住，别在别处自己写一遍，
+      踩过两次：无条件读 items[i].questions.length 会抛 TypeError，
+      而且是"点提交没反应"这种最难查的表现。 */
+function itemQCount(t, it) {
+  if (!it) return 0;
+  if (t.type === 'matching') return (it.statements || []).length;
+  if (t.type === 'cloze' || t.type === 'gap') return Object.keys(it.answers || {}).length;
+  if (OPEN_TYPES.indexOf(t.type) >= 0) return 0;
+  return (it.questions || []).length;
+}
+
+/* 填空题：短文挖空，自己打字。给一个"首字母 + 下划线"的提示（按答案长度生成），
+   判分忽略大小写、前后空格和末尾标点。 */
+function gapBody(it, placed, done) {
+  const parts = esc(it.passage).split(/\{\{(\d+)\}\}/);
+  let out = '';
+  parts.forEach((p, k) => {
+    if (k % 2 === 1) {
+      const n = p, w = placed[n] || '', ans = it.answers[n] || '';
+      if (done) {
+        const ok = normAns(w) === normAns(ans);
+        out += `<span class="blank ${ok ? 'ok' : 'bad'}" data-blank="${n}">${esc(w || '—')}</span>`;
+      } else {
+        const hint = ans ? ans[0] + '_'.repeat(Math.max(2, ans.length - 1)) : '____';
+        // ⚠️ 这行标签必须写成一整行、不能有换行 ——
+        //    下面会统一把文本里的 \n 换成 <br>，标签内部的换行会被一起换掉，
+        //    结果 <input> 被拆成 <input ... value="" <br="">，属性全丢。
+        out += `<input class="gapin" data-gap="${n}" value="${esc(w)}" placeholder="${esc(hint)}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">`;
+      }
+    } else {
+      // 换行处理只作用在**纯文本段**上，不碰上面生成的标签
+      out += wrap(p).replace(/\n\n/g, '|PARA|').replace(/\n/g, '<br>');
+    }
+  });
+  return '<p>' + out.split('|PARA|').join('</p><p>') + '</p>';
+}
+
+/* 填空判分用的归一化：小写、去首尾空格、压缩空格、去末尾标点 */
+function normAns(s) {
+  return String(s || '').toLowerCase().trim()
+    .replace(/\s+/g, ' ').replace(/[.,;:!?'"]+$/, '');
+}
+const wc = s => (String(s || '').match(/[A-Za-z][A-Za-z'\-]*/g) || []).length;
+const cc = s => String(s || '').replace(/\s/g, '').length;
+
 function clozeBody(it, placed, done) {
   const parts = esc(it.passage).split(/\{\{(\d+)\}\}/);
   let out = '';
@@ -1113,21 +1224,49 @@ function clozeBody(it, placed, done) {
       if (done) cls = 'blank ' + (w === it.answers[n] ? 'ok' : 'bad');
       out += `<span class="${cls}" data-blank="${n}">${w || n}</span>`;
     } else {
-      out += wrap(p);
+      // 同 gapBody：换行只处理纯文本段，别把标签内部的换行也换掉
+      out += wrap(p).replace(/\n\n/g, '|PARA|').replace(/\n/g, '<br>');
     }
   });
-  return out.split('\n\n').map(p => '<p>' + p.replace(/\n/g, '<br>') + '</p>').join('');
+  return '<p>' + out.split('|PARA|').join('</p><p>') + '</p>';
+}
+
+/* 「上一篇 / 下一篇」——**不用先交卷就能翻**。
+   之前只有交卷后的结果行里才有"下一篇"，看着就像"点了没反应"。 */
+function pagerRow(t, i) {
+  if (t.items.length < 2) return '';
+  return `<div class="pager">
+    <button class="btn ghost sm" data-prev="1">← 上一篇</button>
+    <span class="meta" style="margin:0">第 ${i + 1} / ${t.items.length} ${
+      esc((QTYPES[t.type] || {}).unit || '篇')}</span>
+    <button class="btn ghost sm" data-next="1">下一篇 →</button>
+  </div>`;
 }
 
 function resultRow(t, i, total, done, d) {
+  const it = t.items[i];
+  if (OPEN_TYPES.indexOf(t.type) >= 0) {
+    const txt = (d.x && d.x.text) || '';
+    const isTr = t.type === 'translate';
+    if (!done) {
+      return `<div class="result"><button class="btn" data-submit="1">提交，看参考${
+        isTr ? '译文' : (t.type === 'speak' ? '回答' : '范文')}</button>
+        <button class="btn ghost sm" data-reset="1">重做</button></div>${pagerRow(t, i)}`;
+    }
+    return `<div class="result">
+      <span class="score">已提交 · ${isTr ? cc(txt) + ' 字' : wc(txt) + ' 词'} · 不看分，自己对照</span>
+      <button class="btn ghost sm" data-next="1">下一篇 →</button>
+      <button class="btn ghost sm" data-reset="1">重做</button></div>`;
+  }
   if (!done) {
     const n = Object.keys(d.a || {}).length + Object.keys(d.p || {}).length;
     return `<div class="result"><button class="btn" data-submit="1">提交（已答 ${n}/${total}）</button>
-      <button class="btn ghost sm" data-reset="1">重做</button></div>`;
+      <button class="btn ghost sm" data-reset="1">重做</button></div>${pagerRow(t, i)}`;
   }
   let right = 0;
-  const it = t.items[i];
-  if (t.type === 'cloze') { for (let n = 1; n <= 10; n++) if (d.p[n] === it.answers[n]) right++; }
+  if (t.type === 'cloze' || t.type === 'gap') {
+    Object.keys(it.answers).forEach(n => { if (normAns(d.p[n]) === normAns(it.answers[n])) right++; });
+  }
   else if (t.type === 'matching') {
     it.statements.forEach((q, k) => { if (d.a[k] === q.answer) right++; });
   } else {
@@ -1151,7 +1290,8 @@ function ensureDraft(t, i) {
   const key = t.type + ':' + i;
   if (!draft || draft.key !== key) {
     const saved = LS.get('draft:' + key, null);
-    draft = { key, a: (saved && saved.a) || {}, p: (saved && saved.p) || {}, chip: null };
+    draft = { key, a: (saved && saved.a) || {}, p: (saved && saved.p) || {},
+              x: (saved && saved.x) || {}, chip: null };
   }
   return draft;
 }
@@ -1644,14 +1784,12 @@ function vMe() {
   <div class="sec">错题本</div>
   ${vWrong()}
 
-  <div class="sec">我的题目（只有我自己看得见）</div>
+  <div class="sec">我的题目</div>
   <div class="card tight">
-    <div class="meta">
-      这个站<b>不带任何版权资料</b>；你自己的资料导进来，只存在这台设备的浏览器里。
-      ${(myBankCount() || myListenCount())
-        ? ` 已导入 <b>${myBankCount()}</b> 篇${myListenCount() ? ' · <b>' + myListenCount() + '</b> 句听力' : ''}，排在每类最前面。`
-        : ''}
-    </div>
+    ${(myBankCount() || myListenCount())
+      ? `<div class="meta">已导入 <b>${myBankCount()}</b> 篇${
+          myListenCount() ? ' · <b>' + myListenCount() + '</b> 句听力' : ''}，排在每类最前面。</div>`
+      : ''}
     <div class="row">
       <button class="btn ghost sm" data-mytoggle="1">导入我的题目</button>
       ${(myBankCount() || myListenCount()) ? `<button class="btn ghost sm" data-myexport="1">导出（可以传给别人）</button>
@@ -1666,15 +1804,8 @@ function vMe() {
         <code>=== 选词填空 ===</code> <code>=== 听力 ===</code>
       </div>
       <div class="meta" style="margin-top:2px">
-        导入目前只认上面这四类分节标题（单项选择 / 判断 / 听力理解这几种
-        本站能做、但还没有对应的导入格式，稍后再补）。${(() => {
-          const ei = examInfo();
-          const miss = ei.types.filter(t => !(QTYPES[t] || {}).impl);
-          if (!miss.length) return '';
-          return `你要考的 <b>${esc(ei.short)}</b> 里还有 <b>${miss.length}</b> 种题型在做（${
-            miss.map(t => esc((QTYPES[t] || {}).name || t)).join(' / ')}），
-            那几种现在导进来也刷不了，先放着。`;
-        })()}
+        导入目前只认上面这四类分节标题。其余题型本站自带题库，
+        想换成自己的材料，照着 <code>D:\Anki学习\阅读题库\</code> 里的格式改文件即可。
       </div>
       <div style="margin:8px 0">
         <input type="file" id="myfile" accept=".txt,.json" style="font-size:12px">
@@ -1692,56 +1823,6 @@ function vMe() {
     </div>
   </div>
 
-  <div class="sec">关于与版权</div>
-  <div class="card">
-    <div class="ttl">这个站的内容从哪来</div>
-    <div class="meta">一句话：能合法公开的都用开源，开源做不到的用原创，不碰真题。</div>
-
-    <div class="item">
-      <div class="h"><span class="tag open">开源语料</span>选词填空 · 听力听写</div>
-      <div class="m">取自 <b>Project Gutenberg</b>（公有领域，可自由使用）：
-        Stories of Inventors、Stories of Great Inventors、A Short History of the World、
-        Giant Brains、Fables and Stories for Children、Among the Meadow People。
-        题目由程序自动生成（挖空 + 按词性挑干扰项），每篇都标注了原书编号和链接。</div>
-    </div>
-
-    <div class="item">
-      <div class="h"><span class="tag orig">原创题</span>仔细阅读 · 长篇匹配</div>
-      <div class="m">按四级真题的体裁和难度撰写。之所以不用开源文本，是因为四级考的是<b>说明文</b>，
-        而实测下来：Gutenberg 的文本难度能对上但体裁是故事/对话；
-        OpenStax 教材是说明文但中位覆盖率只有 66.5%（四级是 77%），太难。</div>
-    </div>
-
-    <div class="item">
-      <div class="h">为什么没有四级真题</div>
-      <div class="m">真题版权属于教育部教育考试院，网上流传的题库（如 GitHub 上几个高星仓库）
-        <b>都没有开源许可证</b>，等于没有授权，不能放进公开网站。</div>
-    </div>
-
-    <div class="item">
-      <div class="h">难度是怎么校准的</div>
-      <div class="m">用 NGSL 词频表（6363 词）+ 四级词表算"覆盖率"：
-        我手写的四级题覆盖率是 70.8%~79.0%（中位 77.1%），
-        据此把开源语料筛在 72%~86% 区间。实际入选的 18 篇落在 77.6%~85.4%。</div>
-    </div>
-
-    <div class="item">
-      <div class="h">
-        <span class="tag" style="background:var(--brand-soft);color:var(--brand);border-color:transparent">自备材料</span>
-        本地真题（可选）</div>
-      <div class="m">${S.bank.hasLocal
-        ? `已加载 <b>${S.bank.hasLocal}</b> 篇自备材料，排在每个题型最前面。`
-        : `还没有。把自己的真题放进 <code>tools/import_papers.py</code> 支持的格式里跑一下，
-           就会生成 <code>site/data/bank.local.json</code>，刷新即可看到。
-           <b>这个文件不会随公开站发布</b>——个人学习用自己买的资料，与把书扫描进电脑是一回事。`}</div>
-    </div>
-
-    <div class="item">
-      <div class="h">你的数据</div>
-      <div class="m">错题、生词、打卡记录全部存在<b>你自己浏览器本地</b>，不上传任何服务器。清浏览器数据会丢。</div>
-    </div>
-  </div>
-
   <div class="card tight">
     <div class="row" style="margin:0">
       <button class="btn ghost sm" data-resetall="1">清空全部本地数据</button>
@@ -1750,62 +1831,6 @@ function vMe() {
 }
 
 /* ---------- 渲染 ---------- */
-/* ---------- 每页的说明（藏在右上角「!」后面，点一下才展开） ---------- */
-const HELP = {
-  home: {
-    t: '首页怎么看',
-    items: [
-      '<b>这个站不带任何题目</b>：不收录真题，也不含版权内容。题目由你在「我的 → 我的题目」里自己导入，只存在你这台设备的浏览器里。',
-      '<b>倒计时</b>按你在「我的 → 我的考试」里选的那一场算，不是写死的。',
-      '<b>连续打卡</b>指有答题动作的天数，断一天就从头算。',
-      '<b>底部导航</b>就是这个考试的全部题型（含还没做的），可以左右滑。标着<b>「还没做」</b>的现在还刷不了。',
-      '<b>点词怎么用</b>：正文里<b>颜色可点的词</b>就是词库收录的，点一下出释义，能一键收进生词本；再点一下或点空白处取消标记。',
-    ],
-  },
-  __type: {
-    t: '这个题型怎么用',
-    items: [
-      '底部导航里的每一项就是当前考试的一种题型，左右可以滑动。',
-      '标着 <b>「还没做」</b>的题型点进去会说明它是什么 —— 它还没实现，暂时刷不了。',
-      '已做好的题型：<b>仔细阅读 · 长篇匹配 · 选词填空 · 听力听写</b>。',
-      '选好答案点 <b>提交</b> 才判分，判完每题都有中文解析；答错的自动进 <b>错题本</b>（在「我的」里）。',
-      '点正文里<b>颜色可点的词</b>：看释义、加入生词本、<b>划线</b>；点同一个词或点空白处取消。',
-      '做题时点选项前面的<b>字母 A / B / C / D</b> 可以把这个选项划掉（不影响作答），方便排除法。',
-      '听力听写：点 ▶ 播放（浏览器朗读），听不清多点几次，也能切慢速；判分忽略大小写和标点。',
-    ],
-  },
-  vocab: {
-    t: '生词本怎么用',
-    items: [
-      '<b>不用装 Anki 也能背</b>：点「开始复习」，按遗忘曲线排期（1 → 2 → 4 → 7 → 15 → 30 → 60 天），记得的往后推、忘了的当天再来一遍。',
-      '<b>导出 CSV（通用）</b>：Excel / 欧路词典 / 不背单词 / 墨墨 等大多能导入，带 BOM 不乱码。',
-      '<b>导出 Anki（TSV）</b>：给装了 Anki 的人，字段顺序是 单词 / 音标 / 释义 / 来源。',
-      '生词只存在<b>你自己浏览器</b>里，别人看不到你的。',
-    ],
-  },
-  me: {
-    t: '这一页在说什么',
-    items: [
-      '<b>我的考试</b>：选你要考的那一个（四级、六级、雅思、托福…）。选错了不要紧 —— 有 <b>「回到选考试页」</b>，随时能重选。',
-      '<b>试卷结构表</b>怎么读：<b>占比</b>是官方公布的卷面比例（加起来 100%）；'
-      + '<b>分值</b>是折算到这场考试满分制后的实际分数。'
-      + '比如四级满分 710，写作占 15% 就是 106.5 分 —— 这和站里的判分是同一把尺子。',
-      '<b>方向</b>：考研英语一/二、雅思 A/G、BEC 初/中/高。方向不同，题目构成和分值都不一样，先选一个。',
-      '<b>我的题目</b>：这个站<b>不带任何版权资料</b>。你自己买的、老师发的资料，导进来只存在你这台设备的浏览器里，不上传、别人看不到。',
-      '所有数据（错题 / 生词 / 打卡）都在<b>你自己浏览器本地</b>，清浏览器数据会丢。',
-    ],
-  },
-};
-
-function vHelp() {
-  const key = route.indexOf('type:') === 0 ? '__type' : route;
-  const h = HELP[key] || HELP.home;
-  return `<div class="card tight helpcard">
-    <div class="h">${esc(h.t)}</div>
-    <ul>${h.items.map(x => '<li>' + x + '</li>').join('')}</ul>
-  </div>`;
-}
-
 /* 选考试（第一步）：只放「阶段分类 + 考试名」，别的什么都不加。
    点一个考试就进第二步（方向 + 卷面 + 日期）。
 
@@ -1880,34 +1905,31 @@ function render() {
     $('#hdSub').textContent = picking ? '选你要考的考试' : '确认方向、日期和卷面';
     $('#hdCount').textContent = '';
     $('#hdClock').textContent = '';
-    const hb0 = $('#hdHelp');
-    if (hb0) hb0.style.display = 'none';
     renderNav();
     $('#view').innerHTML = vOnboard();
     window.scrollTo(0, 0);
     return;
   }
-  const hb1 = $('#hdHelp');
-  if (hb1) hb1.style.display = '';
+  // ⚠️ 顺序很重要：renderNav() 在发现"当前题型不在这个考试的导航里"时
+  //    会把 route 重置成 home（比如换考试之后）。必须先让它改完，再判 isType ——
+  //    否则会出现"页面主体渲染 A 题型、route 却是 home"的不一致状态，
+  //    表现出来就是打字/提交被静默丢掉（输入事件里第一行就是判 route）。
+  renderNav();
   const isType = route.indexOf('type:') === 0;
   if (isType) readType = route.slice(5);      // 题型页：当前题型跟着路由走
   header();
-  renderNav();
   if (route !== 'vocab') vMode = 'list';      // 离开生词页就退出复习态
-  const hb = $('#hdHelp');
-  if (hb) hb.classList.toggle('on', helpOpen);
   const body = route === 'vocab' ? vVocab()
     : route === 'me' ? vMe()
     : isType ? vTypePage(readType)
     : vHome();
-  $('#view').innerHTML = (helpOpen ? vHelp() : '') + body;
+  $('#view').innerHTML = body;
   applyMarks();                        // 把划线/排除线画回去
   if (isType && readType === 'listen') bindListen();
 }
 
 /* ---------- 事件 ---------- */
 document.addEventListener('click', e => {
-  if (e.target.closest('#hdHelp')) { helpOpen = !helpOpen; render(); return; }
   const g = e.target.closest('[data-go]'); if (g) { go(g.dataset.go); return; }
 });
 
@@ -1933,6 +1955,12 @@ document.addEventListener('click', e => {
 
   if (LS.get('ans:' + key, null)) return;   // 已提交，只读
 
+  // 口语：把参考回答读出来
+  if (e.target.closest('[data-playsample]')) {
+    const it3 = t.items[i];
+    if (it3.sample) speak(it3.sample); else toast('这条没有参考回答');
+    return;
+  }
   // 听力理解的播放按钮（读这条题目的 script）
   if (e.target.closest('[data-playq]')) {
     const it2 = t.items[i];
@@ -1961,21 +1989,57 @@ document.addEventListener('click', e => {
   }
   const sub = e.target.closest('[data-submit]');
   if (sub) {
+    if (OPEN_TYPES.indexOf(t.type) >= 0) {
+      const d0 = ensureDraft(t, i);
+      if (!((d0.x || {}).text || '').trim()) { toast('先写点东西再提交'); return; }
+      submitOpen(t, i, d0); return;
+    }
     const d = ensureDraft(t, i);
-    // ⚠️ 只在需要时取长度：cloze 的条目没有 questions / statements 字段，
-    //    放在前面无条件求值会抛 TypeError（曾经把提交按钮点坏过）
-    let nQ = 0;
-    if (t.type === 'matching') nQ = t.items[i].statements.length;
-    else if (t.type !== 'cloze') nQ = t.items[i].questions.length;
-    if (t.type !== 'cloze' && Object.keys(d.a).length < nQ) {
+    const nQ = itemQCount(t, t.items[i]);
+    if (nQ && Object.keys(d.a).length < nQ) {
       if (!confirm('还有没答的题，确定提交？')) return;
     }
     submitRead(t, i, d); return;
   }
   const nx = e.target.closest('[data-next]');
   if (nx) { setState(readType, (i + 1) % t.items.length); draft = null; render(); return; }
+  const pv = e.target.closest('[data-prev]');
+  if (pv) {
+    setState(readType, (i - 1 + t.items.length) % t.items.length);
+    draft = null; render(); return;
+  }
   const rs = e.target.closest('[data-reset]');
   if (rs) { LS.set('ans:' + key, null); LS.set('draft:' + key, null); draft = null; render(); return; }
+});
+
+/* 打字：填空题的每个空、开放式的文本框。
+   ⚠️ 这里**不能调 render()** —— 会丢焦点，用户打一个字就跳出去。
+   只把草稿存起来，顺带更新一下"已答 n/N"和字数。 */
+document.addEventListener('input', e => {
+  if (route.indexOf('type:') !== 0) return;
+  const t = S.bank && S.bank.types.find(x => x.type === readType);
+  if (!t) return;
+  const i = Math.min(stateOf(readType), t.items.length - 1);
+  if (LS.get('ans:' + readType + ':' + i, null)) return;
+  const d = ensureDraft(t, i);
+
+  const gi = e.target.closest('[data-gap]');
+  if (gi) {
+    const n = gi.dataset.gap;
+    if (gi.value) d.p[n] = gi.value; else delete d.p[n];
+    LS.set('draft:' + readType + ':' + i, d);
+    const btn = document.querySelector('[data-submit]');
+    const need = Object.keys(t.items[i].answers || {}).length;
+    if (btn) btn.textContent = '提交（已答 ' + Object.keys(d.p).length + '/' + need + '）';
+    return;
+  }
+  if (e.target.id === 'openin') {
+    d.x = { text: e.target.value };
+    LS.set('draft:' + readType + ':' + i, d);
+    const w = document.getElementById('wc');
+    if (w) w.textContent = t.type === 'translate'
+      ? cc(e.target.value) + ' 字' : wc(e.target.value) + ' 词';
+  }
 });
 
 document.addEventListener('change', e => {
@@ -1999,7 +2063,14 @@ function submitRead(t, i, d) {
   const push = (q, got, ans) => {
     wrong.push({ type: t.type, typeName: t.typeName, title: it.title, q, got: String(got), right: String(ans), t: today() });
   };
-  if (t.type === 'careful' || CHOICE_TYPES.indexOf(t.type) >= 0) {
+  if (t.type === 'cloze' || t.type === 'gap') {
+    Object.keys(it.answers).forEach(n => {
+      const got = d.p[n], ans = it.answers[n];
+      total++;
+      if (normAns(got) === normAns(ans)) right++;
+      else push('第 ' + n + ' 空', got || '未填', ans);
+    });
+  } else if (t.type === 'careful' || CHOICE_TYPES.indexOf(t.type) >= 0) {
     total = it.questions.length;
     it.questions.forEach((q, k) => {
       const got = d.a[k];
@@ -2062,6 +2133,48 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-lskip]')) { li = (li + 1) % S.listen.items.length; render(); return; }
   if (e.target.closest('[data-lnext]')) { li = (li + 1) % S.listen.items.length; render(); return; }
 });
+
+/* 开放式作答（写 / 译 / 说）：不判分、不进正确率，只记打卡。
+   参考范文放在题目的 sample / reference 里，提交后自己对照。 */
+function submitOpen(t, i, d) {
+  LS.set('ans:' + readType + ':' + i, { x: d.x || {} });
+  markDay();
+  render();
+}
+
+/* 选中一段就划上（再选同一段取消）。
+   ------- 为什么不用"点单词"那套：点词只能划一个词，划不了半句、跨词都不行，
+   而做题时想标的是"这句话在讲什么"，是一个片段。 */
+function selOffset(root, node, offset) {
+  const pre = document.createRange();
+  pre.selectNodeContents(root);
+  pre.setEnd(node, offset);
+  return pre.toString().length;
+}
+function bindSelectUnderline() {
+  ['mouseup', 'touchend'].forEach(ev => document.addEventListener(ev, e => {
+    if (route.indexOf('type:') !== 0) return;
+    const ctx = curReadItem();
+    if (!ctx) return;
+    const pEl = e.target.closest && e.target.closest('.passage');
+    if (!pEl) return;
+    setTimeout(() => {                       // 等浏览器把选区定下来
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount || sel.isCollapsed) return;
+      const r = sel.getRangeAt(0);
+      if (!pEl.contains(r.startContainer) || !pEl.contains(r.endContainer)) return;
+      const txt = r.toString();
+      if (!txt.trim()) return;
+      const s = selOffset(pEl, r.startContainer, r.startOffset);
+      toggleRangeMark(ctx.key, s, s + txt.length);
+      sel.removeAllRanges();
+      // 重渲染（而不是只 applyMarks）：让头部的「清除划线」立刻出现。
+      // 这里已经清掉选区了，重渲染不会丢焦点。
+      render();
+      toast('已划线（再选一模一样的一段可取消）');
+    }, 10);
+  }));
+}
 
 /* 生词 / 错题 / 清空 */
 document.addEventListener('click', e => {
@@ -2290,6 +2403,8 @@ async function boot() {
     // 把「自备材料」和「我自己导入的题目」合并进来。
     // 用重建而不是追加，避免重复调用时越叠越多。
     rebuildBank();
+
+    bindSelectUnderline();      // 选中一段即划线
 
     // 第一次进来：先让用户选考试，选完再进训练台
     onboarding = !LS.get('onboarded', false);

@@ -831,6 +831,184 @@
      }
     }
    ]
+  },
+  {
+   "type": "gap",
+   "typeName": "填空题",
+   "note": "",
+   "scorePerQ": 0,
+   "items": [
+    {
+     "id": "gap-01",
+     "title": "远程办公为什么留不下来",
+     "difficulty": "CET-4",
+     "passage": "When the first lockdowns ended, many companies promised that working from home would {{1}} for good. Four years later, most of them have quietly asked their staff to come back. The reason is not that remote work failed to deliver. Studies repeatedly found that people working at home were slightly more {{2}} on individual tasks, and they saved hours of commuting every week.\n\nWhat broke down was everything that happens {{3}} tasks. A new colleague learns how an organisation really works by overhearing a difficult phone call, not by reading a handbook. A team that never meets in person finds it {{4}} to disagree with a senior colleague, because disagreement needs a certain amount of trust, and trust is built slowly. Managers also admitted that they found it hard to {{5}} how much progress was really being made when the only signal was a weekly status report.\n\nThe companies that still allow fully remote work tend to share two features: their work is easy to {{6}}, and their teams were already close before they stopped meeting. For everyone else, the office has come back not as a rule but as a {{7}}: come in when the work needs it, stay home when it does not. The most honest summary may be that remote work did not fail; it simply turned out to be {{8}} than anyone had promised.",
+     "answers": {
+      "1": "stay",
+      "2": "productive",
+      "3": "between",
+      "4": "hard",
+      "5": "judge",
+      "6": "measure",
+      "7": "choice",
+      "8": "harder"
+     },
+     "explains": {
+      "1": "stay for good = 永久保持。这里是说很多公司当初承诺居家办公会「长期保留」。",
+      "2": "productive 高效的。slightly more productive 稍高一点的生产率 —— 后面不能用 careful（细心），搭配不对。",
+      "3": "between tasks 任务「之间」的事。破折号后面讲的都是任务之外的沟通、信任、进度判断。",
+      "4": "hard 困难的。find it hard to do sth 是固定句式（it 是形式宾语）。",
+      "5": "judge 判断。注意这里要的是动词原形，且与 progress 搭配表示「判断进度」。",
+      "6": "measure 衡量。work is easy to measure = 工作成果容易量化。注意前面的 to 后面跟动词原形。",
+      "7": "choice 选择。not as a rule but as a choice = 不再是硬性规定，而是可选项。",
+      "8": "harder 更难的。than anyone had promised 提示这里要用比较级，且整句是与当初的承诺作对比。"
+     },
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者撰写"
+     }
+    }
+   ]
+  },
+  {
+   "type": "write",
+   "typeName": "写作",
+   "note": "",
+   "scorePerQ": 0,
+   "items": [
+    {
+     "id": "write-01",
+     "title": "四级短文写作 · 图书馆应不应该延长开放时间",
+     "difficulty": "CET-4",
+     "points": [
+      "第一段：一句话亮明立场（应该延长）",
+      "第二段：理由一 —— 现实需求（白天有课，晚自习没地方去）",
+      "第三段：理由二 —— 安全（关馆后学生只能去无人看管的咖啡馆、走廊）",
+      "第四段：承认成本，但说明成本很小、值得",
+      "全文用一般现在时；给建议用 should / would 这类词，别用命令式"
+     ],
+     "sample": "Should the library stay open longer during the exam period? I believe it should.\n\nThe main reason is practical. During exams most students study in the evening, after their daytime classes have finished. At present the library closes at ten, which pushes many of them into crowded dormitories where it is almost impossible to concentrate. Two extra hours would give these students a quiet place at exactly the moment they need it most.\n\nThere is also a safety argument. If the library is closed, students who want to study late will move to cafes or corridors that are far less well supervised. Keeping one building open, with staff on duty, is a safer arrangement for everyone.\n\nThe cost is real but modest. The university would need to pay for a few extra hours of staff time and electricity, which seems a small price for helping students perform better at the most important point in the term.",
+     "material": "Suppose your university is collecting students' opinions on whether the library should stay open longer during the exam period. Write a short essay of 120-180 words to state your view and give your reasons.",
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者撰写"
+     }
+    },
+    {
+     "id": "write-02",
+     "title": "雅思 Task 2 · 大学学费该不该由学生承担",
+     "difficulty": "IELTS 6",
+     "points": [
+      "第一段：点明争论是什么，不要在这里就下结论",
+      "第二段：支持收费的理由（毕业生一生收入更高；政府预算有限）",
+      "第三段：支持免费的理由（对穷学生不公平；教育的社会收益）",
+      "第四段：自己的立场 —— 折中方案（低学费 + 按收入还款），并说清为什么两个极端都不好",
+      "「Discuss both views」必须两边都展开，不能只写自己赞成的那边"
+     ],
+     "sample": "Whether students should pay for university, or whether the state should pay for them, is one of the oldest arguments in education policy.\n\nThose who support charging full fees make a straightforward point. Graduates earn considerably more than non-graduates over a working life, so it seems fair that they, rather than taxpayers in general, should cover the cost of the qualification that produced that advantage. Governments also have limited budgets, and money spent subsidising students from wealthy families is money not spent on primary schools or hospitals.\n\nThe opposite view begins from a different kind of fairness. If a degree carries a visible price tag, talented young people from poor families are discouraged from applying, and the country loses their contribution. Higher education also benefits everyone, not only the graduate: a society with more doctors, engineers and teachers is healthier and more productive. On this view, free university is not a gift to students but an investment by the public.\n\nIn my opinion neither extreme works well. Making students pay the full cost deters exactly the applicants a country needs, while making university entirely free is usually paid for by cutting other services. A system of low fees combined with income-linked repayment — where graduates pay back only once they earn enough — keeps the door open without pretending that education is costless.",
+     "material": "Some people believe that university students should pay the full cost of their own education. Others think that higher education should be free for everyone. Discuss both views and give your own opinion. Write at least 250 words.",
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者撰写"
+     }
+    }
+   ]
+  },
+  {
+   "type": "translate",
+   "typeName": "翻译",
+   "note": "",
+   "scorePerQ": 0,
+   "items": [
+    {
+     "id": "translate-01",
+     "title": "四级汉译英 · 移动支付",
+     "difficulty": "CET-4",
+     "points": [
+      "「迅速普及」可以译成 spread rapidly / become widespread",
+      "「无论……还是……」用 whether ... or ...",
+      "「扫一下二维码」是 scan a QR code",
+      "「不仅……也……」用 not only ... but also ...，注意 not only 提前时后面要倒装",
+      "「随之出现」可以处理成 have also appeared / have come along with it",
+      "四级段落翻译不要求逐字对应，句子太长就拆开"
+     ],
+     "reference": "Over the past decade, mobile payment has spread rapidly in China. Today, whether in large cities or small towns, people hardly need to carry cash when they go out: they can pay simply by scanning a QR code with their phone. This change has not only made shopping more convenient, but also given many small traders a complete record of their transactions for the first time. Of course, new problems have appeared along with it. Some elderly people are not comfortable using smartphones, and without help from their families they run into a good deal of trouble in daily life. Therefore, while promoting new technology, society should also keep some traditional ways of paying for these people.",
+     "material": "过去十年里，移动支付在中国迅速普及。如今，无论在大城市还是小城镇，人们出门几乎不再需要带现金，用手机扫一下二维码就能完成付款。这种变化不仅让购物更方便，也让许多小商贩第一次有了完整的交易记录。当然，新的问题也随之出现：一些老年人不太会用智能手机，如果没有家人帮忙，他们在生活中会遇到不少麻烦。因此，在推广新技术的同时，社会也应当为这些人保留一些传统的支付方式。",
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者撰写"
+     }
+    },
+    {
+     "id": "translate-02",
+     "title": "考研英译汉 · 关于「注意力」",
+     "difficulty": "考研",
+     "points": [
+      "It is tempting to ... 译成「人们很容易……」或「我们很容易把……」",
+      "in the way that money is 是省略结构，补全为 in the way that money is spent and replaced",
+      "capacity 这里是「能力、容量」，不是「容量大小」；与 grow/shrink 搭配译成「会增强或减弱」",
+      "the very faculty 的 very 是强调，译成「恰恰是那种能力」",
+      "最后一句 the same expenditure of time 指「看起来同样是花掉一段时间」"
+     ],
+     "reference": "人们很容易把注意力当成一种像金钱那样可以花掉、再补回来的资源。这个比喻是误导性的。注意力并不是一个用掉就会减少的固定量，而是一种会随着使用方式增强或减弱的能力。一个人花一小时读难懂的东西，可能在这一小时结束时反而更能集中精神；而刷一小时手机，留下的却可能是更强的疲惫感和更差的专注力。因此，表面上同样是花掉一段时间，对「让时间变得有用的那种能力」产生的影响可能恰恰相反。",
+     "material": "It is tempting to treat attention as a resource that can simply be spent and then replaced, in the way that money is. This metaphor is misleading. Attention is not a fixed quantity that is consumed by use; it is a capacity that grows or shrinks depending on how it is used. A person who spends an hour reading something difficult may end that hour with more ability to concentrate, not less, while an hour of scrolling may leave a stronger sense of fatigue and a weaker ability to focus. What looks like the same expenditure of time can therefore have opposite effects on the very faculty that makes the time useful.",
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者撰写"
+     }
+    }
+   ]
+  },
+  {
+   "type": "speak",
+   "typeName": "口语",
+   "note": "",
+   "scorePerQ": 0,
+   "items": [
+    {
+     "id": "speak-01",
+     "title": "雅思 Part 2 · 描述一个一开始很难的技能",
+     "difficulty": "IELTS 6",
+     "seconds": 120,
+     "points": [
+      "先给一句总述，再按题卡上的四个点依次展开 —— 漏掉任何一点都会失分",
+      "用过去时讲学习过程，用现在时讲现在的感受",
+      "准备的一分钟里只写关键词，不要写完整句子",
+      "卡住时可以用 Well, let me think... / What I mean is... 把话接住，沉默比语法错更扣分"
+     ],
+     "sample": "The skill I'd like to talk about is touch typing, which I learned in my second year of university.\n\nAt the time I was writing a lot of essays, and I was still typing with two fingers. It was painfully slow, and I kept losing my train of thought because I had to look down at the keyboard every few seconds. A friend told me that touch typing would save me hours, so I decided to learn it properly.\n\nWhat made it difficult was that I had to become slower before I could become faster. For about two weeks I was typing at half my usual speed, and every essay took longer than it used to. There were moments when I wanted to give up and go back to my old habit, because the new way felt completely unnatural.\n\nI stuck with it mainly by practising for ten minutes every morning rather than trying to change everything at once. After a month or so, my speed passed what it had been before, and I stopped thinking about the keyboard at all.\n\nLooking back, I feel quite proud of it. More importantly, it taught me something I've used many times since: with this kind of skill, the awkward stage isn't a sign that you're doing it wrong — it's the part you have to get through.",
+     "material": "Describe a skill you learned that was difficult at first. You should say: what the skill was; when and why you learned it; what made it difficult; and explain how you feel about it now. You have one minute to prepare and should speak for one to two minutes.",
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者撰写"
+     }
+    },
+    {
+     "id": "speak-02",
+     "title": "四级口语 · 怎么过周末",
+     "difficulty": "CET-4",
+     "seconds": 60,
+     "points": [
+      "四级口语更看重「敢说、说完整」，句子简单没关系，别为了用难句而卡住",
+      "用 usually / often / sometimes 交代频率，用 because 说明原因",
+      "准备时列三个要点就够了：做什么、和谁、为什么",
+      "一分钟大概说 8–10 句，不要只讲两句就停"
+     ],
+     "sample": "On weekends I try to keep things simple, because my weekdays are quite busy.\n\nOn Saturday morning I usually sleep a little longer and then go for a run in the park near my flat. After that I meet a couple of friends for lunch. We don't do anything special — we just talk and walk around the city. In the afternoon I normally study for two or three hours, mainly English, because I have an exam coming up.\n\nSunday is quieter. I stay at home, tidy my room, do some washing and read. In the evening I plan the week ahead and go to bed early.\n\nI spend my weekends this way because I need both things: time with other people and time on my own. If I only rest, I feel that Monday comes too fast, but if I only study, I start the new week already tired.",
+     "material": "Talk about how you usually spend your weekends. You should say what you usually do, who you spend the time with, and why you spend your weekends that way. You have one minute to prepare and should speak for about one minute.",
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者撰写"
+     }
+    }
+   ]
   }
  ]
 }
