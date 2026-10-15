@@ -513,13 +513,8 @@ function vExamPick() {
     </div>
     ${dn !== null ? `<div class="meta" style="margin:7px 0 0">还有 <b>${dn}</b> 天</div>` : ''}
   </div>
+`;}
 
-  <div class="card tight">
-    <div class="row" style="margin:0">
-      <button class="btn ghost sm" data-repick="1">回到选考试页</button>
-    </div>
-  </div>`;
-}
 const S = { bank: null, dict: null, listen: null };
 const LS = {
   get(k, d) { try { const v = localStorage.getItem('cet4:' + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
@@ -761,6 +756,31 @@ function getMarks(key) {
   return marks[key];
 }
 
+/* 哪些区域可以划线：短文、匹配题的段落、题干。
+   ⚠️ 原来只认 `.passage`，所以匹配题（.para）和没材料的单选题（题干 .qt）
+      根本划不了 —— 用户说"其他题也要可以划线"。
+   区间按 {c, s, e} 存：c 是"第几个可划线容器"，s/e 是该容器内的字符偏移。 */
+const UL_SEL = '.passage, .para, .qt';
+function ulContainers() {
+  return Array.prototype.slice.call(document.querySelectorAll('#view ' + UL_SEL));
+}
+/* 把容器内的字符偏移还原成一个 DOM Range（Highlight API 要用） */
+function rangeFromOffsets(root, s, e) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+  let pos = 0, n, startN = null, startO = 0, endN = null, endO = 0;
+  while ((n = walker.nextNode())) {
+    const len = n.nodeValue.length;
+    if (!startN && pos + len >= s) { startN = n; startO = s - pos; }
+    if (pos + len >= e) { endN = n; endO = e - pos; break; }
+    pos += len;
+  }
+  if (!startN || !endN) return null;
+  const r = document.createRange();
+  r.setStart(startN, Math.max(0, Math.min(startO, startN.nodeValue.length)));
+  r.setEnd(endN, Math.max(0, Math.min(endO, endN.nodeValue.length)));
+  return r;
+}
+
 /* 选一段 → 划上；选到**已经有划线的地方** → 取消那一部分。
    ⚠️ 判断标准是"有没有重叠"，不是"是否一模一样" ——
       拖选很难选到字符级完全相同（通常差一个空格、少一个字），
@@ -769,18 +789,20 @@ function getMarks(key) {
      和已有划线完全不重叠 → 加上
      有任何重叠           → 把重叠部分从已有划线里减掉（可能一分为二）
    区间按字符偏移存，重渲染后靠 applyMarks 逐词回填 .ul。 */
-function toggleRangeMark(key, s, e) {
+function toggleRangeMark(key, c, s, e) {
   if (e < s) { const t = s; s = e; e = t; }
   const m = getMarks(key);
   let touched = false;
   const out = [];
   m.r.forEach(r => {
-    if (r.e <= s || r.s >= e) { out.push(r); return; }   // 不重叠，原样保留
+    const rc = r.c || 0;
+    // 不同容器之间不可能重叠，原样保留
+    if (rc !== c || r.e <= s || r.s >= e) { out.push(r); return; }
     touched = true;
-    if (r.s < s) out.push({ s: r.s, e: s });             // 左边没被盖到的部分
-    if (r.e > e) out.push({ s: e, e: r.e });             // 右边没被盖到的部分
+    if (r.s < s) out.push({ c: c, s: r.s, e: s });       // 左边没被盖到的部分
+    if (r.e > e) out.push({ c: c, s: e, e: r.e });       // 右边没被盖到的部分
   });
-  if (!touched) out.push({ s: s, e: e });                // 全新的一段，划上
+  if (!touched) out.push({ c: c, s: s, e: e });          // 全新的一段，划上
   m.r = out.filter(r => r.e - r.s > 0);
   LS.set('marks', marks);
   return !touched;                                       // true = 这次是"划上"
@@ -805,25 +827,43 @@ function applyMarks() {
     const w = (el.dataset.w || '').toLowerCase();
     if (vocab.some(v => v.word === w)) el.classList.add('saved');
   });
-  // 划线：把存的字符区间换算成"哪些可点词落在区间里"，逐词加 .ul
-  if (ctx) {
-    const rs = ((marks[ctx.key] || {}).r) || [];
+  if (!ctx) return;
+  const rs = ((marks[ctx.key] || {}).r) || [];
+  const conts = ulContainers();
+  // 逐词加 .ul：① 不支持 Highlight API 的浏览器靠它显示划线；
+  //              ② 自测里能直接数 .w.ul。
+  // ⚠️ 这一步不能因为用了 Highlight API 就跳过 —— 下面还有"排除选项"要画，
+  //    之前在这里 return，把 strike 一起跳过了（排除选项整个失效）。
+  conts.forEach((root, k) => {
+    const mine = rs.filter(r => (r.c || 0) === k);
+    if (!mine.length) return;
+    let pos = 0;
+    const walk = node => {
+      if (node.nodeType === 3) { pos += node.nodeValue.length; return; }
+      if (node.nodeType !== 1) return;
+      if (node.classList.contains('w')) {
+        const len = node.textContent.length;
+        if (mine.some(r => r.s < pos + len && r.e > pos)) node.classList.add('ul');
+        pos += len;
+        return;
+      }
+      Array.prototype.forEach.call(node.childNodes, walk);
+    };
+    Array.prototype.forEach.call(root.childNodes, walk);
+  });
+  // 额外再画一层：CSS Custom Highlight 能把整条区间连成一条下划线（中文也能划）。
+  // 它和上面的 .ul 不冲突，只是让下划线更连续。
+  if (window.Highlight && window.CSS && CSS.highlights) {
+    try { CSS.highlights.delete('ul'); } catch (e) { /* 没有就算了 */ }
     if (rs.length) {
-      document.querySelectorAll('.passage').forEach(el => {
-        let pos = 0;
-        const walk = node => {
-          if (node.nodeType === 3) { pos += node.nodeValue.length; return; }
-          if (node.nodeType !== 1) return;
-          if (node.classList.contains('w')) {
-            const len = node.textContent.length;
-            if (rs.some(r => r.s < pos + len && r.e > pos)) node.classList.add('ul');
-            pos += len;
-            return;
-          }
-          Array.prototype.forEach.call(node.childNodes, walk);
-        };
-        Array.prototype.forEach.call(el.childNodes, walk);
+      const hl = new Highlight();
+      rs.forEach(r => {
+        const root = conts[r.c || 0];
+        if (!root) return;
+        const rg = rangeFromOffsets(root, r.s, r.e);
+        if (rg) hl.add(rg);
       });
+      CSS.highlights.set('ul', hl);
     }
   }
   if (!ctx) return;
@@ -837,7 +877,6 @@ function applyMarks() {
 /* ---------- 路由 ---------- */
 let route = 'home', readType = 'careful';
 let onboarding = false;    // 首次进来：先选考试
-let onboardReturn = 'home'; // 从哪一页点进"选考试"的，返回时退回去
 let onboardStep = 0;        // 0 = 列考试；1 = 确认页（方向 + 日期 + 试卷结构）
 let onboardExam = null;     // 确认页正在看的是哪个考试
 let onboardVariant = null;  // 确认页选的方向（还没落盘）
@@ -988,7 +1027,25 @@ function vHome() {
     <a href="#me" data-go="me"><div class="n">📊 我的</div><div class="d">错题 ${wrong.length} 条</div></a>
   </div>
 
-  <div class="sec">各题型做了多少</div>
+  <div class="sec">这套卷子的进度</div>
+  <div class="card tight">
+    ${(() => {
+      const types = examInfo().types;
+      const total = types.reduce((a, t) => {
+        const bt = S.bank && S.bank.types.find(x => x.type === t);
+        return a + (bt ? bt.items.length
+          : (t === 'listen' && S.listen ? S.listen.items.length : 0));
+      }, 0);
+      const done = types.reduce((a, t) => a + doneCountOf(t), 0);
+      const pct = total ? Math.round(done / total * 100) : 0;
+      return `<div class="pbar"><i style="width:${pct}%"></i></div>
+        <div class="meta" style="margin:9px 0 0">
+          已做 <b>${done}</b> / ${total} 项 · <b>${pct}%</b>${
+            done >= total && total ? '（这套卷子刷完了）' : ''}</div>`;
+    })()}
+  </div>
+
+  <div class="sec">各题型做了多少（累计）</div>
   <div class="card tight">
     <div class="vlist">
       ${examInfo().types.map(t => {
@@ -1122,19 +1179,31 @@ function vItem(t, i) {
     const material = it.material || it.prompt || '';
     h += `<div class="passage" style="font-size:16px;line-height:1.85">${
       isTr ? esc(material) : '<b>' + esc(material) + '</b>'}</div></div><div class="card">`;
-    if (!done) {
+    if (t.type === 'speak' && !done) {
+      // 口语不是"写"——给准备 + 说的计时器，不用作文框
+      h += `<div class="spkbox">
+        <div class="spkclock" id="spkclock">准备好了就点开始</div>
+        <div class="row" style="margin:14px 0 0;justify-content:center">
+          <button class="btn" data-spkprep="1">开始准备 ${it.prepSeconds || 60} 秒</button>
+          <button class="btn ghost" data-spktalk="1">直接开始说 ${it.seconds || 120} 秒</button>
+        </div>
+      </div>`;
+    } else if (!done) {
       h += `<textarea id="openin" class="big" rows="9"
-        placeholder="${isTr ? '在这里写你的译文…' : (t.type === 'speak' ? '把自己说的写下来（方便对照）…' : '在这里写你的作文…')}"
+        placeholder="${isTr ? '在这里写你的译文…' : '在这里写你的作文…'}"
         >${esc(myText)}</textarea>
         <div class="meta" style="margin-top:6px" id="wc">${
           isTr ? cc(myText) + ' 字' : wc(myText) + ' 词'}</div>`;
     } else {
-      h += `<div class="sub"><div class="meta">你的作答</div>
-        <div style="white-space:pre-wrap;line-height:1.8">${esc(myText) || '<i>（空）</i>'}</div>
-        <div class="meta" style="margin-top:8px">
-          <button class="btn ghost sm" data-copyopen="1">复制我的作答</button>
-          <span style="margin-left:6px">发给 AI，可以让它按这场考试的标准打分</span>
-        </div></div>`;
+      // 口语没有"作答文本"可显示，写/译才有
+      if (t.type !== 'speak') {
+        h += `<div class="sub"><div class="meta">你的作答</div>
+          <div style="white-space:pre-wrap;line-height:1.8">${esc(myText) || '<i>（空）</i>'}</div>
+          <div class="meta" style="margin-top:8px">
+            <button class="btn ghost sm" data-copyopen="1">复制我的作答</button>
+            <span style="margin-left:6px">发给 AI，可以让它按这场考试的标准打分</span>
+          </div></div>`;
+      }
     }
     h += resultRow(t, i, 0, done, d);
     if (done) {
@@ -1274,7 +1343,8 @@ function resultRow(t, i, total, done, d) {
     const txt = (d.x && d.x.text) || '';
     const isTr = t.type === 'translate';
     if (!done) {
-      return `<div class="result"><button class="btn" data-submit="1">提交</button>
+      return `<div class="result"><button class="btn" data-submit="1">${
+        t.type === 'speak' ? '看参考回答' : '提交'}</button>
         <button class="btn ghost sm" data-reset="1">重做</button></div>${pagerRow(t, i)}`;
     }
     return `<div class="result">
@@ -1866,9 +1936,7 @@ function vOnboard() {
           style="font-size:13px;padding:9px 13px">${esc(e.short || e.name)}</button>`).join('')}
       </div>
     </div>`).join('')}
-  ${picked ? `<div class="row" style="margin:16px 0 0">
-      <button class="btn ghost sm" data-obout="1">← 返回</button>
-    </div>` : ''}`;
+`;
 }
 
 /* 第二步：确认这个考试。有方向的先选方向，再看它能考什么、几道题、多少分，
@@ -1977,6 +2045,13 @@ document.addEventListener('click', e => {
     if (it2.script) speak(it2.script); else toast('这条题目没有听力材料');
     return;
   }
+  // 口语的计时器（必须放在题型页的监听器里 —— 这里才有 t 和 i）
+  if (e.target.closest('[data-spkprep]')) {
+    spkStart('prep', t.items[i].prepSeconds || 60); return;
+  }
+  if (e.target.closest('[data-spktalk]')) {
+    spkStart('talk', t.items[i].seconds || 120); return;
+  }
   const pk = e.target.closest('[data-pick]');
   if (pk) {
     const [qi, oi] = pk.dataset.pick.split(':').map(Number);
@@ -2001,7 +2076,10 @@ document.addEventListener('click', e => {
   if (sub) {
     if (OPEN_TYPES.indexOf(t.type) >= 0) {
       const d0 = ensureDraft(t, i);
-      if (!((d0.x || {}).text || '').trim()) { toast('先写点东西再提交'); return; }
+      // 口语不是写，没有文本可检查
+      if (t.type !== 'speak' && !((d0.x || {}).text || '').trim()) {
+        toast('先写点东西再提交'); return;
+      }
       submitOpen(t, i, d0); return;
     }
     const d = ensureDraft(t, i);
@@ -2144,6 +2222,36 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-lnext]')) { li = (li + 1) % S.listen.items.length; render(); return; }
 });
 
+/* 口语的计时器：准备 → 说。只改时钟那一个元素的文字，
+   不 render()（一 render 就把计时重置了）。 */
+let spk = { phase: null, left: 0, t: null };
+function spkPaint() {
+  const el = document.getElementById('spkclock');
+  if (!el) return;
+  if (!spk.phase) { el.textContent = '准备好了就点开始'; return; }
+  const m = Math.floor(spk.left / 60), sec = spk.left % 60;
+  el.textContent = (spk.phase === 'prep' ? '准备中 ' : '说 ') + m + ':'
+    + (sec < 10 ? '0' : '') + sec;
+}
+function spkStart(phase, secs) {
+  if (spk.t) clearInterval(spk.t);
+  spk.phase = phase;
+  spk.left = secs;
+  spkPaint();
+  spk.t = setInterval(() => {
+    spk.left--;
+    if (spk.left <= 0) {
+      clearInterval(spk.t);
+      spk.t = null;
+      spk.phase = null;
+      const el = document.getElementById('spkclock');
+      if (el) el.textContent = phase === 'prep' ? '准备时间到，可以开始说了' : '时间到';
+      return;
+    }
+    spkPaint();
+  }, 1000);
+}
+
 /* 复制文本：优先用 clipboard API，不行就退回 textarea + execCommand
    （file:// 下 clipboard API 常常不可用） */
 function copyText(txt) {
@@ -2189,17 +2297,24 @@ function bindSelectUnderline() {
     if (route.indexOf('type:') !== 0) return;
     const ctx = curReadItem();
     if (!ctx) return;
-    const pEl = e.target.closest && e.target.closest('.passage');
-    if (!pEl) return;
     setTimeout(() => {                       // 等浏览器把选区定下来
       const sel = window.getSelection();
       if (!sel || !sel.rangeCount || sel.isCollapsed) return;
       const r = sel.getRangeAt(0);
-      if (!pEl.contains(r.startContainer) || !pEl.contains(r.endContainer)) return;
+      // 看这段选区落在第几个可划线容器里（短文 / 段落 / 题干都算）
+      const conts = ulContainers();
+      let ci = -1, pEl = null;
+      for (let k = 0; k < conts.length; k++) {
+        const el = conts[k];
+        if (el.contains(r.startContainer) && el.contains(r.endContainer)) {
+          ci = k; pEl = el; break;
+        }
+      }
+      if (ci < 0) return;
       const txt = r.toString();
       if (!txt.trim()) return;
       const s = selOffset(pEl, r.startContainer, r.startOffset);
-      const added = toggleRangeMark(ctx.key, s, s + txt.length);
+      const added = toggleRangeMark(ctx.key, ci, s, s + txt.length);
       sel.removeAllRanges();
       // 重渲染（而不是只 applyMarks）：让头部的「清除划线」立刻出现。
       // 这里已经清掉选区了，重渲染不会丢焦点。
@@ -2259,34 +2374,6 @@ document.addEventListener('click', e => {
     }
     return;
   }
-  /* 选考试页的出路：首次进来 = 先用四级；从「我的」回来 = 退回原来那一页 */
-  /* 选考试页的唯一出口：只在"从「我的」回来换考试"时才有这个按钮，
-     点了就退回进来之前那一页。首次进来没有出口 —— 必须选一个。
-     下面的 first 分支只是兜底（万一状态不一致，点了也别把人卡住）。 */
-  if (e.target.closest('[data-obout]')) {
-    const first = !LS.get('onboarded', false);
-    if (first) {
-      LS.set('exam', { id: DEFAULT_EXAM_ID });
-      LS.set('onboarded', true);
-    }
-    onboarding = false;
-    onboardStep = 0;
-    onboardExam = null;
-    route = first ? 'home' : (onboardReturn || 'home');
-    if (location.hash !== '#' + route) history.replaceState(null, '', '#' + route);
-    render();
-    return;
-  }
-  /* 从「我的」回到选考试页（记住从哪来的，返回时退回去） */
-  if (e.target.closest('[data-repick]')) {
-    onboardReturn = route;
-    onboarding = true;
-    onboardStep = 0;
-    onboardExam = null;
-    window.scrollTo(0, 0);
-    render();
-    return;
-  }
   /* 选方向。两种场合共用一个入口：
      选考试流程里 = 只记在内存，等"进去"再落盘；
      「我的考试」里 = 直接落盘。 */
@@ -2331,7 +2418,7 @@ document.addEventListener('click', e => {
     onboardStep = 0;
     onboardExam = null;
     onboardVariant = null;
-    route = wasPicked ? (onboardReturn || 'home') : 'home';
+    route = 'home';
     if (location.hash !== '#' + route) history.replaceState(null, '', '#' + route);
     render();
     toast('已选：' + (ex.short || ex.name)

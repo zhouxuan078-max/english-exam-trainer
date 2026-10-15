@@ -337,3 +337,25 @@ textarea.big:focus { outline: none; border-color: var(--brand); }
   gap: 10px; margin-top: 14px;
 }
 .pager .meta { margin: 0; }
+
+/* 划线的样子：用 CSS Custom Highlight 画，连续一条、中英文都行 */
+::highlight(ul) {
+  background-color: var(--brand-soft);
+  text-decoration: underline;
+  text-decoration-color: var(--brand);
+  text-decoration-thickness: 2px;
+}
+/* 老浏览器不支持 Highlight API 时的退路：逐词加 .ul（见 app.js） */
+.w.ul { text-decoration: underline; text-decoration-color: var(--brand); text-decoration-thickness: 2px; }
+
+/* 卷子进度条 */
+.pbar { height: 8px; border-radius: 5px; background: var(--line); overflow: hidden; }
+.pbar > i { display: block; height: 100%; background: var(--brand); border-radius: 5px;
+            transition: width .25s ease; }
+
+/* 口语的计时器 */
+.spkbox { padding: 18px 12px; text-align: center; }
+.spkclock {
+  font-size: 30px; font-weight: 600; color: var(--brand);
+  font-variant-numeric: tabular-nums; letter-spacing: .5px;
+}
