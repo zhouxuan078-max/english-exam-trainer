@@ -41,191 +41,179 @@ const QTYPES = {
   speak:     { name: '口语',     impl: false, unit: '题' },
 };
 
-/* 考试清单。
-   只收**大学阶段及以上**的考试（本科 / 研究生 / 出国 / 职场），不含中小学。
+/* 考试清单。只收**大学阶段及以上**的考试（本科 / 研究生 / 出国 / 职场），不含中小学。
 
-   ⚠️ 每个考试的 `paper` 是它的**试卷结构**（题型 / 题量 / 分值），
-   `types` 由 paper 派生 —— 这样"题型漏了写作翻译"那种错在结构上就不可能再犯：
-   试卷结构本身就等于题型清单，改一处两处都对。
+   ⚠️ 每个考试的 `paper` 是它的**试卷结构**，`types` 完全由 paper 派生 ——
+   试卷结构本身就是题型清单，"漏了写作翻译"那种错在结构上不可能再犯。
 
-   ⚠️ 有的考试分方向（考研英语一/二、雅思 A/G 类…），方向会改变题目构成，
-   所以放在 `variants` 里，由使用者选一次。
+   一行四个数：
+     count  题量
+     pct    占比(%) —— 官方试卷结构就是这么公布的
+     score  这个题型的**分值**，按本考试的满分制折算
+     parts  题量细分（只写事实：几篇、几题，不写说明文字）
+     drill  这一行要练的题型。默认就是 t；只有"卷面不细分、但实际要分头练"
+            的才需要 —— 比如雅思阅读官方只给"40 题 / 25%"，
+            实际上得练 选择 / 判断 / 填空 三种。
+
+   ⚠️⚠️ 分值的尺度必须和**判分**一致。
+   四级判分用的是 710 分制（题库里的 scorePerQ：仔细阅读 14.2/题 × 10 = 142、
+   长篇阅读 7.1 × 10 = 71、选词填空 3.55 × 10 = 35.5），
+   所以这张表也必须是 710 制的折合分。
+   ⛔ 之前这里写的是 15 / 35 / 5 / 10 / 20 / 15 —— 那是**百分比**，
+      却挂在「分值」列下面，和站内实际判分对不上，是错的。
+
+   ⚠️ 这里**不写任何说明性文字**（出处、通过线、考试时长、注意事项…）。
+      要解释就放进右上角「!」的帮助面板（见 HELP）。
+
+   ⚠️ 有的考试分方向（考研英语一/二、雅思 A/G、BEC 初/中/高），
+      方向会改变题目构成，放在 `variants` 里，由使用者选一次。
 */
+
+/* 考研英语一 / 英语二：只有 翻译、写作 的分值不同 */
+const KY_PAPER = (trPct, wrPct) => [
+  { t: 'cloze',     label: '完形填空',        count: 20, pct: 10, score: 10 },
+  { t: 'careful',   label: '阅读理解 Part A', count: 20, pct: 40, score: 40 },
+  { t: 'matching',  label: '阅读 Part B（新题型）', count: 5, pct: 10, score: 10 },
+  { t: 'translate', label: '翻译',            count: 5,  pct: trPct, score: trPct },
+  { t: 'write',     label: '写作',            count: 2,  pct: wrPct, score: wrPct,
+    parts: '应用文 + 短文' },
+];
+
 const EXAMS = [
-  /* ———————— 大学 ———————— */
+  /* ———————————————— 大学 ———————————————— */
   { id: 'cet4', group: '大学', name: '大学英语四级（CET-4）', short: '大学英语四级',
-    date: '2026-12-12',
-    total: { q: 57, score: 100, min: 125 },
+    q: 57, full: 710,
     paper: [
-      { t: 'write',     label: '写作',               count: 1,  score: 15 },
-      { t: 'listening', label: '听力理解',           count: 25, score: 35,
+      { t: 'write',     label: '写作',     count: 1,  pct: 15, score: 106.5 },
+      { t: 'listening', label: '听力理解', count: 25, pct: 35, score: 248.5,
         parts: '短篇新闻 7 · 长对话 8 · 听力篇章 10' },
-      { t: 'cloze',     label: '词汇理解（选词填空）', count: 10, score: 5,  block: '阅读理解 40 分钟' },
-      { t: 'matching',  label: '长篇阅读（匹配）',    count: 10, score: 10, block: '阅读理解 40 分钟' },
-      { t: 'careful',   label: '仔细阅读',           count: 10, score: 20, block: '阅读理解 40 分钟' },
-      { t: 'translate', label: '翻译（汉译英段落）',  count: 1,  score: 15 },
-    ],
-    src: '中国教育考试网官方试卷结构',
-    note: '上午 9:00-11:20；425 分为六级报考门槛' },
+      { t: 'cloze',     label: '选词填空', count: 10, pct: 5,  score: 35.5 },
+      { t: 'matching',  label: '长篇阅读', count: 10, pct: 10, score: 71 },
+      { t: 'careful',   label: '仔细阅读', count: 10, pct: 20, score: 142 },
+      { t: 'translate', label: '翻译',     count: 1,  pct: 15, score: 106.5 },
+    ] },
 
   { id: 'cet6', group: '大学', name: '大学英语六级（CET-6）', short: '大学英语六级',
-    date: '',
-    total: { q: 57, score: 100, min: 130 },
+    q: 57, full: 710,
     paper: [
-      { t: 'write',     label: '写作',               count: 1,  score: 15 },
-      { t: 'listening', label: '听力理解',           count: 25, score: 35,
+      { t: 'write',     label: '写作',     count: 1,  pct: 15, score: 106.5 },
+      { t: 'listening', label: '听力理解', count: 25, pct: 35, score: 248.5,
         parts: '长对话 8 · 听力篇章 7 · 讲话/报道/讲座 10' },
-      { t: 'cloze',     label: '词汇理解（选词填空）', count: 10, score: 5,  block: '阅读理解 40 分钟' },
-      { t: 'matching',  label: '长篇阅读（匹配）',    count: 10, score: 10, block: '阅读理解 40 分钟' },
-      { t: 'careful',   label: '仔细阅读',           count: 10, score: 20, block: '阅读理解 40 分钟' },
-      { t: 'translate', label: '翻译（汉译英段落）',  count: 1,  score: 15 },
-    ],
-    src: '中国教育考试网官方试卷结构',
-    note: '结构与四级相同、难度更高；四级 425 分以上才能报考' },
+      { t: 'cloze',     label: '选词填空', count: 10, pct: 5,  score: 35.5 },
+      { t: 'matching',  label: '长篇阅读', count: 10, pct: 10, score: 71 },
+      { t: 'careful',   label: '仔细阅读', count: 10, pct: 20, score: 142 },
+      { t: 'translate', label: '翻译',     count: 1,  pct: 15, score: 106.5 },
+    ] },
 
   { id: 'tem4', group: '大学', name: '英语专业四级（TEM-4）', short: '英语专业四级',
-    date: '',
-    total: { q: 67, score: 100, min: 130 },
+    q: 67, full: 100,
     paper: [
-      { t: 'listen',    label: '听写（Dictation）',  count: 1,  score: 10,
-        parts: '专四独有 —— 四六级不考听写' },
-      { t: 'listening', label: '听力理解',           count: 20, score: 20,
-        parts: '讲座 10 · 对话 10（单选）' },
-      { t: 'single',    label: '语言知识（语法词汇）', count: 20, score: 20 },
-      { t: 'cloze',     label: '完形填空',           count: 10, score: 10 },
-      { t: 'careful',   label: '阅读理解',           count: 15, score: 20 },
-      { t: 'write',     label: '写作',               count: 1,  score: 20,
+      { t: 'listen',    label: '听写',     count: 1,  pct: 10, score: 10 },
+      { t: 'listening', label: '听力理解', count: 20, pct: 20, score: 20,
+        parts: '讲座 10 · 对话 10' },
+      { t: 'single',    label: '语言知识', count: 20, pct: 20, score: 20 },
+      { t: 'cloze',     label: '完形填空', count: 10, pct: 10, score: 10 },
+      { t: 'careful',   label: '阅读理解', count: 15, pct: 20, score: 20 },
+      { t: 'write',     label: '写作',     count: 1,  pct: 20, score: 20,
         parts: '便条 + 作文' },
-    ],
-    note: '英语专业大二考；听写是专四特有的题型，四六级不考' },
+    ] },
 
   { id: 'kaoyan', group: '大学', name: '考研英语', short: '考研英语',
-    date: '',
+    q: 52, full: 100,
     variants: [
-      { id: 'en1', name: '英语一', note: '学术型硕士' },
-      { id: 'en2', name: '英语二', note: '专业型硕士' },
+      { id: 'en1', name: '英语一', note: '学术型硕士', paper: KY_PAPER(10, 30) },
+      { id: 'en2', name: '英语二', note: '专业型硕士', paper: KY_PAPER(15, 25) },
     ],
-    total: { q: 52, score: 100, min: 180 },
-    paper: [
-      { t: 'cloze',     label: '完形填空（英语知识运用）', count: 20, score: 10 },
-      { t: 'careful',   label: '阅读理解 Part A',    count: 20, score: 40 },
-      { t: 'matching',  label: '阅读理解 Part B（新题型）', count: 5, score: 10 },
-      { t: 'translate', label: '翻译（英语一：英译汉 5 句 / 英语二：汉译英段落）', count: 5, score: 10 },
-      { t: 'write',     label: '写作',               count: 2,  score: 30,
-        parts: 'Part A 应用文 10 分 + Part B 短文 20 分' },
-    ],
-    src: '英语一结构；英语二题型相同、翻译与写作分值略有差别',
-    note: '12 月下旬考；英语一、英语二难度不同' },
+    paper: KY_PAPER(10, 30) },
 
-  /* ———————— 出国 ———————— */
+  /* ———————————————— 出国 ———————————————— */
   { id: 'ielts', group: '出国', name: '雅思 IELTS', short: '雅思',
-    date: '',
+    q: 85, full: 9,
     variants: [
       { id: 'a', name: 'A 类（学术）', note: '出国留学用' },
       { id: 'g', name: 'G 类（培训）', note: '移民 / 工作用' },
     ],
-    total: { q: 85, score: 9, min: 165 },
     paper: [
-      { t: 'listening', label: '听力（4 段录音）',   count: 40, score: 25, parts: '约 30 分钟 + 10 分钟誊写' },
-      // 阅读固定 40 题，但三种小题型各占几题每场都不同 —— 所以不写死题量
-      { t: 'single',    label: '阅读 · 选择题',      count: 0, score: 0,
-        parts: 'A 类 3 篇文章；G 类生活题材为主' },
-      { t: 'judge',     label: '阅读 · 判断 / 匹配', count: 0, score: 0,
-        parts: 'True / False / Not Given、标题匹配、信息匹配' },
-      { t: 'gap',       label: '阅读 · 填空 / 简答', count: 0, score: 0,
-        parts: '摘要填空、句子填空、表格填空、简短回答' },
-      { t: 'write',     label: '写作',               count: 2,  score: 25,
-        parts: 'A 类：图表描述 150 词 + 议论文 250 词；G 类：书信 + 议论文' },
-      { t: 'speak',     label: '口语',               count: 3,  score: 25, parts: '11–14 分钟，面对面' },
-    ],
-    src: '总分 9 分制，四项各占 25%，取平均；阅读 40 题由上面三类小题型混排组成',
-    note: '考试日期由自己报名决定；机考 / 纸笔可选' },
+      { t: 'listening', label: '听力', count: 40, pct: 25, parts: '4 段录音' },
+      // 官方只给"阅读 40 题 / 25%"，不细分；但实际要练这三种
+      { t: 'single',    label: '阅读', count: 40, pct: 25,
+        parts: '选择 · 判断（T/F/NG）· 标题匹配 · 填空 · 简答',
+        drill: ['single', 'judge', 'gap'] },
+      { t: 'write',     label: '写作', count: 2,  pct: 25,
+        parts: 'A 类：图表描述 + 议论文 · G 类：书信 + 议论文' },
+      { t: 'speak',     label: '口语', count: 3,  pct: 25, parts: '3 个部分' },
+    ] },
 
   { id: 'toefl', group: '出国', name: '托福 TOEFL iBT', short: '托福',
-    date: '',
-    total: { q: 54, score: 120, min: 116 },
+    q: 54, full: 120,
     paper: [
-      { t: 'single',    label: '阅读',               count: 20, score: 30, parts: '2 篇 · 约 35 分钟' },
-      { t: 'listening', label: '听力',               count: 28, score: 30, parts: '约 36 分钟' },
-      { t: 'speak',     label: '口语',               count: 4,  score: 30, parts: '4 个任务 · 16 分钟（对着机器说）' },
-      { t: 'write',     label: '写作',               count: 2,  score: 30, parts: '综合写作 + 学术讨论 · 29 分钟' },
-    ],
-    note: '全机考；总分 120，四项各 30 分' },
+      { t: 'single',    label: '阅读', count: 20, pct: 25, score: 30, parts: '2 篇' },
+      { t: 'listening', label: '听力', count: 28, pct: 25, score: 30 },
+      { t: 'speak',     label: '口语', count: 4,  pct: 25, score: 30 },
+      { t: 'write',     label: '写作', count: 2,  pct: 25, score: 30,
+        parts: '综合写作 + 学术讨论' },
+    ] },
 
   { id: 'duolingo', group: '出国', name: '多邻国英语测试（DET）', short: '多邻国',
-    date: '',
-    total: { score: 160, min: 60 },
+    full: 160,
     paper: [
-      { t: 'single',    label: '选择 / 判断类',      count: 0, score: 0, parts: '自适应出题，题量因人而异' },
-      { t: 'gap',       label: '填空 / 听写',        count: 0, score: 0 },
-      { t: 'listening', label: '听力（含朗读句子）',  count: 0, score: 0 },
-      { t: 'write',     label: '写作 / 看图写句',     count: 0, score: 0 },
-      { t: 'speak',     label: '口语（含看图说话）',  count: 0, score: 0 },
-    ],
-    src: '自适应考试，题量和题型随答题表现变化，没有固定卷面',
-    note: '线上考、便宜、出分快；总分 160' },
+      { t: 'single',    label: '选择', count: 0, pct: 0, parts: '读选 · 听选' },
+      { t: 'judge',     label: '判断', count: 0, pct: 0, parts: '真词 / 假词' },
+      { t: 'gap',       label: '填空', count: 0, pct: 0, parts: '读填空 · 听写' },
+      { t: 'listening', label: '听力', count: 0, pct: 0 },
+      { t: 'write',     label: '写作', count: 0, pct: 0, parts: '看图写作 · 写作样本' },
+      { t: 'speak',     label: '口语', count: 0, pct: 0, parts: '看图说话 · 口语样本' },
+    ] },
 
   { id: 'pte', group: '出国', name: 'PTE Academic', short: 'PTE',
-    date: '',
-    total: { score: 90, min: 115 },
+    full: 90,
     paper: [
-      { t: 'speak',     label: '口语（第一部分）',   count: 0, score: 0, parts: '朗读、复述、描述图表…' },
-      { t: 'write',     label: '写作（含总结听写）',  count: 0, score: 0 },
-      { t: 'single',    label: '阅读',               count: 0, score: 0 },
-      { t: 'gap',       label: '填空（阅读 / 听力）', count: 0, score: 0 },
-      { t: 'listening', label: '听力',               count: 0, score: 0 },
-    ],
-    src: '三大部分：口语写作 / 阅读 / 听力，共约 2 小时',
-    note: '全机考，出分快，澳洲认可度高' },
+      { t: 'speak',     label: '口语', count: 0, pct: 0, parts: '朗读 · 复述 · 描述图表' },
+      { t: 'write',     label: '写作', count: 0, pct: 0, parts: '总结听写 · 议论文' },
+      { t: 'single',    label: '阅读', count: 0, pct: 0 },
+      { t: 'gap',       label: '填空', count: 0, pct: 0 },
+      { t: 'listening', label: '听力', count: 0, pct: 0 },
+    ] },
 
   { id: 'gre', group: '出国', name: 'GRE', short: 'GRE',
-    date: '',
-    total: { score: 340, min: 118 },
+    full: 340,
     paper: [
-      { t: 'gap',       label: '填空（Text Completion / Sentence Equivalence）', count: 0, score: 0 },
-      { t: 'single',    label: '阅读理解',           count: 0, score: 0, parts: 'Verbal 两个 section' },
-      { t: 'write',     label: '分析性写作（Analytical Writing）', count: 1, score: 0,
-        parts: 'Issue 任务 30 分钟（0–6 分）' },
-    ],
-    note: 'Verbal / Quant 各 130–170 分，写作 0–6 分' },
+      { t: 'gap',    label: '填空', count: 0, pct: 0,
+        parts: 'Text Completion · Sentence Equivalence' },
+      { t: 'single', label: '阅读理解', count: 0, pct: 0 },
+      { t: 'write',  label: '分析性写作', count: 1, pct: 0, parts: 'Issue 任务（0–6 分）' },
+    ] },
 
   { id: 'sat', group: '出国', name: 'SAT', short: 'SAT',
-    date: '',
-    total: { q: 98, score: 1600, min: 134 },
+    q: 98, full: 1600,
     paper: [
-      { t: 'single',    label: '阅读与文法（Reading & Writing）', count: 54, score: 800, parts: '64 分钟' },
-      { t: 'single',    label: '数学',               count: 44, score: 800, parts: '70 分钟' },
-    ],
-    src: '2024 起改为自适应机考，写作部分已取消',
-    note: '总分 1600；机考自适应' },
+      { t: 'single', label: '阅读与文法', count: 54, pct: 50, score: 800 },
+      { t: 'single', label: '数学',       count: 44, pct: 50, score: 800 },
+    ] },
 
-  /* ———————— 职场 ———————— */
+  /* ———————————————— 职场 ———————————————— */
   { id: 'bec', group: '职场', name: '商务英语 BEC', short: 'BEC',
-    date: '',
+    full: 100,
     variants: [
       { id: 'p', name: '初级', note: 'Preliminary' },
       { id: 'v', name: '中级', note: 'Vantage' },
       { id: 'h', name: '高级', note: 'Higher' },
     ],
-    total: { score: 100, min: 165 },
     paper: [
-      { t: 'single',    label: '阅读',               count: 0, score: 25, parts: '45 分钟；各级题量不同' },
-      { t: 'write',     label: '写作',               count: 2,  score: 25, parts: '45 分钟' },
-      { t: 'listening', label: '听力',               count: 30, score: 25, parts: '40 分钟' },
-      { t: 'speak',     label: '口语',               count: 3,  score: 25, parts: '16 分钟，两人一组' },
-    ],
-    note: '初 / 中 / 高三级；听说读写各占 25%' },
+      { t: 'single',    label: '阅读', count: 0,  pct: 25, score: 25 },
+      { t: 'write',     label: '写作', count: 2,  pct: 25, score: 25 },
+      { t: 'listening', label: '听力', count: 30, pct: 25, score: 25 },
+      { t: 'speak',     label: '口语', count: 3,  pct: 25, score: 25 },
+    ] },
 
   { id: 'toeic', group: '职场', name: '托业 TOEIC（听力与阅读）', short: '托业',
-    date: '',
-    total: { q: 200, score: 990, min: 120 },
+    q: 200, full: 990,
     paper: [
-      { t: 'listening', label: '听力',               count: 100, score: 495,
-        parts: '照片 6 · 问答 25 · 对话 39 · 独白 30 · 45 分钟' },
-      { t: 'single',    label: '阅读',               count: 100, score: 495,
-        parts: '句子填空 30 · 短文填空 16 · 阅读理解 54 · 75 分钟' },
-    ],
-    note: '只考听力和阅读；总分 10–990' },
+      { t: 'listening', label: '听力', count: 100, pct: 50, score: 495,
+        parts: '照片 6 · 问答 25 · 对话 39 · 独白 30' },
+      { t: 'single',    label: '阅读', count: 100, pct: 50, score: 495,
+        parts: '句子填空 30 · 短文填空 16 · 阅读理解 54' },
+    ] },
 ];
 
 /* 有的考试分方向，方向会改变题目构成 —— 由使用者选一次 */
@@ -236,6 +224,8 @@ function curVariant(ex) {
   return (ex.variants || []).find(v => v.id === sel.variant) || null;
 }
 
+/* 当前方向下的试卷结构。方向自带 paper 就用它的
+   （考研英语一/二只有翻译和写作的分值不同） */
 function paperOf(ex) {
   ex = ex || curExam();
   const v = curVariant(ex);
@@ -243,55 +233,75 @@ function paperOf(ex) {
   return ex.paper || [];
 }
 
-function totalOf(ex) {
+/* 本场考试的满分（四级 710、托福 120、雅思 9…） */
+function fullOf(ex) {
   ex = ex || curExam();
   const v = curVariant(ex);
-  return (v && v.total) ? v.total : (ex.total || null);
+  return (v && v.full) || ex.full || null;
 }
 
-/* 题型从试卷结构派生 —— 唯一来源，不会再漏 */
+/* 本场考试的卷面总题量 */
+function qOf(ex) {
+  ex = ex || curExam();
+  const v = curVariant(ex);
+  return (v && v.q) || ex.q || null;
+}
+
+/* 题型从试卷结构派生 —— 唯一来源。
+   row.t 是这一行的主题型；row.drill 是"官方不细分、但要分头练"的额外题型
+   （目前只有雅思阅读用：官方只给"40 题 / 25%"，实际要练选择/判断/填空）。 */
 function typesOf(ex) {
   ex = ex || curExam();
   const seen = [];
-  paperOf(ex).forEach(p => { if (seen.indexOf(p.t) < 0) seen.push(p.t); });
+  paperOf(ex).forEach(p => {
+    [p.t].concat(p.drill || []).forEach(t => {
+      if (t && seen.indexOf(t) < 0) seen.push(t);
+    });
+  });
   return seen;
 }
 
-/* 某个题型在这个考试里的规格（题量 / 分值 / 细分） */
-function paperRowOf(t, ex) {
+/* 表尾「合计」。用考试自己声明的总数 —— 它才是这场考试的卷面总量；
+   靠每行相加会算少（雅思阅读那行官方不给细分题量/分值）。 */
+function paperTotals(ex) {
   ex = ex || curExam();
-  const hit = paperOf(ex).filter(p => p.t === t);
-  if (!hit.length) return null;
-  return {
-    label: hit[0].label, parts: hit.map(h => h.parts).filter(Boolean).join('；'),
-    count: hit.reduce((a, h) => a + (h.count || 0), 0),
-    score: hit.reduce((a, h) => a + (h.score || 0), 0),
-  };
+  const rows = paperOf(ex);
+  const allNum = k => rows.length > 0 && rows.every(r => (r[k] || 0) > 0);
+  return { q: qOf(ex), full: fullOf(ex), pct: allNum('pct') ? 100 : null };
 }
 
-/* 试卷结构表 —— 选考试页和「我的考试」两处共用。
-   自适应考试的题量/分值写死了也不知道，就显示 "—"。 */
+/* 试卷结构表 —— 选考试页 和「我的考试」两处共用。
+   ⚠️ 列名必须是「占比」而不是「分值」：官方公布的卷面结构给的是百分比，
+      而「分值」那列是**折算到本考试满分制**的实际分数。
+      四级按 710 制：写作 106.5 / 听力 248.5 / 选词 35.5 / 长篇 71 /
+      仔细 142 / 翻译 106.5 —— 和站内判分（scorePerQ）是同一把尺子。
+   ⛔ 曾经把百分比填在「分值」列下（15/35/5/10/20/15），是错的。 */
 function paperTable(ex) {
   const rows = paperOf(ex);
   if (!rows.length) return '<div class="empty">这个考试没有固定卷面。</div>';
-  const t = totalOf(ex);
-  const num = v => (v ? v : '<i>—</i>');
+  const t = paperTotals(ex);
+  const cell = v => (v || v === 0) && v !== 0 ? String(v) : '<i>—</i>';
   return `<table class="pt">
-    <thead><tr><th>题型</th><th class="num">题量</th><th class="num">分值</th></tr></thead>
+    <thead><tr><th>题型</th><th class="num">题量</th>
+      <th class="num">占比</th><th class="num">分值</th></tr></thead>
     <tbody>${rows.map(r => `<tr>
       <td><b>${esc(r.label)}</b>${
-        r.block ? `<em class="blk">${esc(r.block)}</em>` : ''}${
         r.parts ? `<span class="pr">${esc(r.parts)}</span>` : ''}</td>
-      <td class="num">${num(r.count)}</td>
-      <td class="num">${num(r.score)}</td>
+      <td class="num">${cell(r.count)}</td>
+      <td class="num">${r.pct ? esc(r.pct) + '%' : '<i>—</i>'}</td>
+      <td class="num">${cell(r.score)}</td>
     </tr>`).join('')}</tbody>
-    ${t ? `<tfoot><tr><td>合计</td><td class="num">${num(t.q)}</td>
-      <td class="num">${esc(String(t.score))}</td></tr></tfoot>` : ''}
+    <tfoot><tr>
+      <td>合计</td>
+      <td class="num">${cell(t.q)}</td>
+      <td class="num">${t.pct ? t.pct + '%' : '<i>—</i>'}</td>
+      <td class="num">${cell(t.full)}</td>
+    </tr></tfoot>
   </table>`;
 }
 
-/* 方向选择器 —— 考研英语一/二、雅思 A/G 类、BEC 初/中/高。
-   方向会改变题目构成，所以要让人选一次。 */
+/* 方向选择器 —— 考研英语一/二、雅思 A/G、BEC 初/中/高。
+   方向会改变题目构成，所以要让人选一次。note 只挂在 title 上，不上屏。 */
 function variantRow(ex, active) {
   if (!(ex.variants || []).length) return '';
   return `<div class="row" style="margin:0;gap:6px;flex-wrap:wrap">
@@ -336,8 +346,8 @@ function examInfo() {
   return {
     id: ex.id, name: ex.name, short: ex.short || ex.name,
     date: custom ? sel.date : (ex.date || ''),
-    note: ex.note || '', src: ex.src || '',
-    types: typesOf(ex), paper: paperOf(ex), total: totalOf(ex),
+    types: typesOf(ex), paper: paperOf(ex),
+    q: qOf(ex), full: fullOf(ex),
     variants: ex.variants || [], variant: v ? v.id : null,
     variantName: v ? v.name : '',
     custom,
@@ -394,12 +404,10 @@ function vExamPick() {
     if (!g) { g = { n: e.group, items: [] }; groups.push(g); }
     g.items.push(e);
   });
-  const miss = missingTypes();
-  const tot = totalOf(ex);
+  const tot = paperTotals(ex);
   return `
   <div class="sec">我的考试</div>
   <div class="card tight">
-    <div class="meta">选你要考的那一个 —— 首页倒计时、底部导航、题型都会跟着换。</div>
     ${groups.map(g => `
       <div class="meta" style="margin:10px 0 5px;color:var(--fg3)">${esc(g.n)}</div>
       <div class="row" style="margin:0;gap:6px;flex-wrap:wrap">
@@ -411,35 +419,26 @@ function vExamPick() {
   <div class="sec">当前：${esc(cur.name)}${cur.variantName ? ' · ' + esc(cur.variantName) : ''}</div>
 
   ${(cur.variants || []).length ? `<div class="card tight">
-    <div class="meta" style="margin:0 0 8px">这个考试分方向，方向不同题目就不一样 —— 先选一个。</div>
     ${variantRow(ex, cur.variant)}
   </div>` : ''}
 
   <div class="card tight">
     <details class="fold">
-      <summary>看这场考试的试卷结构${
-        tot ? `（${paperOf(ex).length} 项 · ${tot.q ? tot.q + ' 题 · ' : ''}满分 ${tot.score}）` : ''}</summary>
+      <summary>试卷结构${
+        tot.q ? ` · ${tot.q} 题` : ''}${tot.full ? ` · ${tot.full} 分` : ''}</summary>
       ${paperTable(ex)}
-      ${miss.length ? `<div class="meta" style="margin-top:9px">
-        其中 <b>${miss.length}</b> 种题型还在做：${
-          miss.map(t => esc((QTYPES[t] || {}).name || t)).join(' / ')}。
-        做好的先用着，剩下的会陆续补上。</div>` : ''}
-      ${cur.src ? `<div class="meta" style="margin-top:6px;color:var(--fg3)">来源：${esc(cur.src)}</div>` : ''}
-      ${cur.note ? `<div class="meta" style="margin-top:4px;color:var(--fg3)">${esc(cur.note)}</div>` : ''}
     </details>
   </div>
 
   <div class="sec">考试日期</div>
   <div class="card tight">
-    <div class="meta" style="margin:0 0 8px">填你自己的报名日期，首页就有倒计时。不填也行。</div>
     <div class="row" style="margin:0">
       <input type="date" id="examdate" value="${cur.date}"
         style="font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
       <button class="btn sm" data-examsave="1">保存</button>
-      ${cur.custom ? `<button class="btn ghost sm" data-examreset="1">恢复默认</button>` : ''}
+      ${cur.custom ? `<button class="btn ghost sm" data-examreset="1">清除</button>` : ''}
     </div>
-    <div class="meta" style="margin-top:7px">${
-      dn !== null ? '还有 <b>' + dn + '</b> 天' : '还没设日期'}</div>
+    ${dn !== null ? `<div class="meta" style="margin:7px 0 0">还有 <b>${dn}</b> 天</div>` : ''}
   </div>
 
   <div class="card tight">
@@ -845,21 +844,11 @@ function vHome() {
     })()}
   </div>
 
-  ${(() => {
-    const cur = examInfo();
-    const miss = missingTypes();
-    return `<div class="card tight">
-      <div class="meta">
-        站里<b>不带任何题目</b>（避免版权问题）。去「我的 → 我的题目」
-        把你手上的资料导进来就能刷。
-        ${miss.length ? `这个考试还有 <b>${miss.length}</b> 种题型在做：${
-          miss.map(t => esc((QTYPES[t] || {}).name || t)).join(' / ')}。` : ''}
-      </div>
-      <div class="row">
-        <button class="btn ghost sm" data-go="me">去导入我的题目</button>
-      </div>
-    </div>`;
-  })()}
+  <div class="card tight">
+    <div class="row" style="margin:0">
+      <button class="btn ghost sm" data-go="me">导入我的题目</button>
+    </div>
+  </div>
 
   <div class="stat-grid">
     <div class="stat"><div class="k">连续打卡</div><div class="v">${streak()} <small>天</small></div></div>
@@ -1672,11 +1661,11 @@ const HELP = {
   home: {
     t: '首页怎么看',
     items: [
-      '<b>倒计时</b>按你在「我的 → 我的考试场次」里选的那一场算，不是写死的。',
-      '<b>今天做什么</b>是建议量，做完就行，不用自己加码。',
+      '<b>这个站不带任何题目</b>：不收录真题，也不含版权内容。题目由你在「我的 → 我的题目」里自己导入，只存在你这台设备的浏览器里。',
+      '<b>倒计时</b>按你在「我的 → 我的考试」里选的那一场算，不是写死的。',
       '<b>连续打卡</b>指有答题动作的天数，断一天就从头算。',
+      '<b>底部导航</b>就是这个考试的全部题型（含还没做的），可以左右滑。标着<b>「还没做」</b>的现在还刷不了。',
       '<b>点词怎么用</b>：正文里<b>颜色可点的词</b>就是词库收录的，点一下出释义，能一键收进生词本；再点一下或点空白处取消标记。',
-      '题目来源：选词填空与听力取自 <b>Project Gutenberg</b>（公有领域）自动生成；仔细阅读与长篇匹配是原创题；不含真题。',
     ],
   },
   __type: {
@@ -1703,9 +1692,12 @@ const HELP = {
   me: {
     t: '这一页在说什么',
     items: [
-      '<b>我的考试</b>：选你要考的那一个（四级、六级、雅思、托福…），首页名称和倒计时跟着变。选错了不要紧 —— 区块里有 <b>「重新选考试」</b>，随时能回到选考试那一屏。',
+      '<b>我的考试</b>：选你要考的那一个（四级、六级、雅思、托福…）。选错了不要紧 —— 有 <b>「回到选考试页」</b>，随时能重选。',
+      '<b>试卷结构表</b>怎么读：<b>占比</b>是官方公布的卷面比例（加起来 100%）；'
+      + '<b>分值</b>是折算到这场考试满分制后的实际分数。'
+      + '比如四级满分 710，写作占 15% 就是 106.5 分 —— 这和站里的判分是同一把尺子。',
+      '<b>方向</b>：考研英语一/二、雅思 A/G、BEC 初/中/高。方向不同，题目构成和分值都不一样，先选一个。',
       '<b>我的题目</b>：这个站<b>不带任何版权资料</b>。你自己买的、老师发的资料，导进来只存在你这台设备的浏览器里，不上传、别人看不到。',
-      '<b>关于与版权</b>：开源语料取自 Project Gutenberg（公有领域），原创题由作者撰写，<b>不含四级真题</b>。',
       '所有数据（错题 / 生词 / 打卡）都在<b>你自己浏览器本地</b>，清浏览器数据会丢。',
     ],
   },
@@ -1729,7 +1721,7 @@ function vHelp() {
 function vOnboard() {
   const picked = !!LS.get('onboarded', false);
   const ex = onboardExam && EXAMS_BY_ID[onboardExam];
-  if (onboardStep === 1 && ex) return vOnboardConfirm(ex, picked);
+  if (onboardStep === 1 && ex) return vOnboardConfirm(ex);
   const groups = [];
   EXAMS.forEach(e => {
     let g = groups.find(x => x.n === e.group);
@@ -1751,39 +1743,29 @@ function vOnboard() {
 }
 
 /* 第二步：确认这个考试。有方向的先选方向，再看它能考什么、几道题、多少分，
-   最后填一个自己的考试日期（不填也行）。 */
-function vOnboardConfirm(ex, picked) {
+   最后填一个自己的考试日期。 */
+function vOnboardConfirm(ex) {
   const hasV = (ex.variants || []).length > 0;
   const v = onboardVariant ? (ex.variants || []).find(x => x.id === onboardVariant) : null;
-  const miss = missingTypes(ex.id);
   const today = LS.get('exam', null) || {};
   const dfltDate = (today.id === ex.id && today.date) ? today.date : (ex.date || '');
   return `
   <div class="card">
     <div class="ttl">${esc(ex.name)}</div>
-    ${ex.note ? `<div class="meta" style="margin-top:5px">${esc(ex.note)}</div>` : ''}
   </div>
 
-  ${hasV ? `<div class="sec">考哪一个方向</div>
+  ${hasV ? `<div class="sec">方向</div>
   <div class="card tight">
-    <div class="meta" style="margin:0 0 8px">方向不同，题目构成就不一样 —— 先选一个。</div>
     ${variantRow(ex, onboardVariant)}
-    ${v && v.note ? `<div class="meta" style="margin-top:7px;color:var(--fg3)">${esc(v.note)}</div>` : ''}
   </div>` : ''}
 
-  <div class="sec">要考什么</div>
+  <div class="sec">试卷结构</div>
   <div class="card tight">
     ${paperTable(ex)}
-    ${miss.length ? `<div class="meta" style="margin-top:9px">
-      其中 <b>${miss.length}</b> 种题型还在做：${
-        miss.map(t => esc((QTYPES[t] || {}).name || t)).join(' / ')}。
-      做好的那几个现在就能刷。</div>` : ''}
-    ${ex.src ? `<div class="meta" style="margin-top:6px;color:var(--fg3)">来源：${esc(ex.src)}</div>` : ''}
   </div>
 
-  <div class="sec">你的考试日期</div>
+  <div class="sec">考试日期</div>
   <div class="card tight">
-    <div class="meta" style="margin:0 0 8px">填上自己的报名日期，首页就有倒计时。不填也行。</div>
     <div class="row" style="margin:0">
       <input type="date" id="obdate" value="${dfltDate}"
         style="font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
@@ -1794,9 +1776,6 @@ function vOnboardConfirm(ex, picked) {
     <div class="row" style="margin:0;gap:8px;flex-wrap:wrap">
       <button class="btn" data-obbegin="1">${hasV && !v ? '先选个方向' : '就这个，进去'}</button>
       <button class="btn ghost" data-obback="1">← 换一个考试</button>
-    </div>
-    <div class="meta" style="margin-top:8px">
-      ${picked ? '确认后回到训练台。' : '确认后进训练台；日期以后也能在「我的」里改。'}
     </div>
   </div>`;
 }
@@ -2137,7 +2116,7 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-examreset]')) {
     setExam({ date: null });
     render();
-    toast('已恢复默认日期');
+    toast('已清除考试日期');
     return;
   }
   if (e.target.closest('[data-clearvocab]')) {
