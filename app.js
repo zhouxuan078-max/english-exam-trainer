@@ -3,62 +3,80 @@
 
 /* ==================== 考试 与 题型 ====================
    QTYPES 是题型登记表：impl 为 true 才是"能出题、能判分"的题型。
-   EXAMS  是考试清单：每个考试声明它要考哪些题型。
+   EXAMS  是考试清单：每个考试如实声明它考核的全部题型。
 
-   ⚠️ 两条硬规矩：
-   1. 加新考试 = 往 EXAMS 加一条，并且它的 types **必须都已实现**。
-      只加考试名不实现题型，会让使用者选了考试却刷不了题 —— 那是骗人。
-   2. 题型没做完之前，不要在任何文案里承诺"支持这个考试"。
+   ⚠️⚠️ 两条硬规矩（都踩过，别再犯）：
+
+   1. 考试声明的题型必须【如实、完整】—— **包括还没实现的**。
+      ⛔ 绝不能因为"没实现"就把某个题型从考试里删掉。
+         踩过：四级的 types 里只有仔细阅读/长篇匹配/选词填空/听力听写，
+         因为写作和翻译"还没做"就被我漏掉了 ——
+         结果四级的结构成了错的（它写作、翻译各占 15%）。
+      正确做法：如实列出来，让界面把"还没做"标出来。
+
+   2. 题型清单要按**官方试卷结构**整理，别凭印象。
+      四级官方结构（中国教育考试网）：
+         写作 15% | 听力理解 25 题 35% | 阅读理解 30 题 35% | 翻译 15%
+      顺带一个易错点：**四级听力是"选择题 + 真实音频"，不是"听写"。**
+      "听写"是专四（TEM-4）才考的题型。
    ==================================================== */
 
 const QTYPES = {
-  careful:  { name: '仔细阅读', impl: true,  unit: '篇' },
-  matching: { name: '长篇匹配', impl: true,  unit: '篇' },
-  cloze:    { name: '选词填空', impl: true,  unit: '篇' },
-  listen:   { name: '听力听写', impl: true,  unit: '句' },
-  // —— 以下还没实现，先登记着，方便按顺序补 ——
-  single:   { name: '单项选择', impl: false, unit: '题' },
-  judge:    { name: '判断题',   impl: false, unit: '题' },
-  gap:      { name: '填空题',   impl: false, unit: '题' },
-  audio:    { name: '音频听力', impl: false, unit: '题' },
-  write:    { name: '写作',     impl: false, unit: '篇' },
-  speak:    { name: '口语',     impl: false, unit: '题' },
+  /* —— 已实现 —— */
+  careful:   { name: '仔细阅读', impl: true,  unit: '篇' },
+  matching:  { name: '长篇匹配', impl: true,  unit: '篇' },
+  cloze:     { name: '选词填空', impl: true,  unit: '篇' },
+  listen:    { name: '听力听写', impl: true,  unit: '句' },
+  /* —— 还没实现 —— */
+  single:    { name: '单项选择', impl: false, unit: '题' },
+  listening: { name: '听力理解', impl: false, unit: '题' },
+  judge:     { name: '判断题',   impl: false, unit: '题' },
+  gap:       { name: '填空题',   impl: false, unit: '题' },
+  write:     { name: '写作',     impl: false, unit: '篇' },
+  translate: { name: '翻译',     impl: false, unit: '题' },
+  speak:     { name: '口语',     impl: false, unit: '题' },
 };
 
 /* 考试清单。group 决定在界面上怎么分组；数组顺序就是推进顺序。
-   builtin:true = 站里已经内置了这个考试的题库。 */
+   types 按**官方试卷结构**的顺序排（写作 → 听力 → 阅读 → 翻译）。
+   builtin:true = 站里已经内置了这个考试的题库（现在全部为 false）。 */
 const EXAMS = [
-  /* ——— 第一阶段：四级（UI 先做好，题库由使用者自己导入） ——— */
+  /* ——— 大学 ——— */
   { id: 'cet4', group: '大学', name: '大学英语四级（CET-4）', short: '大学英语四级',
     date: '2026-12-12', builtin: false,
-    types: ['careful', 'matching', 'cloze', 'listen'],
+    types: ['write', 'listening', 'cloze', 'matching', 'careful', 'translate'],
     struct: '写作 15% · 听力 35% · 阅读 35% · 翻译 15%',
-    note: '上午 9:00-11:20，总分 710，425 分为六级报考门槛' },
-
-  /* ——— 第二阶段：题型和四级相同，接上就能用，只缺题库 ——— */
+    note: '上午 9:00-11:20，共 57 题 125 分钟；425 分为六级报考门槛' },
   { id: 'cet6', group: '大学', name: '大学英语六级（CET-6）', short: '大学英语六级',
-    date: '', builtin: false, types: ['careful', 'matching', 'cloze', 'listen'],
-    note: '题型与四级相同、难度更高；四级 425 分以上才能报考' },
+    date: '', builtin: false,
+    types: ['write', 'listening', 'cloze', 'matching', 'careful', 'translate'],
+    struct: '写作 15% · 听力 35% · 阅读 35% · 翻译 15%',
+    note: '结构与四级相同、难度更高；四级 425 分以上才能报考' },
   { id: 'tem4', group: '大学', name: '英语专业四级（TEM-4）', short: '英语专业四级',
-    date: '', builtin: false, types: ['careful', 'matching', 'cloze', 'listen'],
-    note: '英语专业大二考，难度接近六级' },
+    date: '', builtin: false,
+    types: ['listen', 'listening', 'single', 'cloze', 'careful', 'write'],
+    note: '英语专业大二考；**听写是专四特有的题型**' },
   { id: 'kaoyan', group: '大学', name: '考研英语（一 / 二）', short: '考研英语',
-    date: '', builtin: false, types: ['careful', 'matching', 'cloze'],
-    note: '12 月下旬考，具体日期每年不同' },
+    date: '', builtin: false,
+    types: ['cloze', 'careful', 'matching', 'translate', 'write'],
+    note: '12 月下旬考；英语一、英语二题型略有差别' },
 
-  /* ——— 第三阶段：需要补新题型 ——— */
+  /* ——— 出国 ——— */
   { id: 'ielts', group: '出国', name: '雅思 IELTS', short: '雅思',
     date: '', builtin: false,
-    types: ['single', 'judge', 'gap', 'matching', 'write', 'speak'],
-    note: '听说读写四项，机考 / 纸笔可选；考试日期自己报名决定' },
+    types: ['listening', 'single', 'judge', 'matching', 'gap', 'write', 'speak'],
+    note: '听说读写四项，机考 / 纸笔可选' },
   { id: 'toefl', group: '出国', name: '托福 TOEFL iBT', short: '托福',
-    date: '', builtin: false, types: ['single', 'audio', 'gap', 'write', 'speak'],
+    date: '', builtin: false,
+    types: ['single', 'listening', 'write', 'speak'],
     note: '全机考，阅读听力以选择题为主' },
   { id: 'duolingo', group: '出国', name: '多邻国英语测试（DET）', short: '多邻国',
-    date: '', builtin: false, types: ['single', 'gap', 'write', 'speak'],
+    date: '', builtin: false,
+    types: ['single', 'gap', 'listening', 'write', 'speak'],
     note: '线上考、便宜、出分快' },
   { id: 'pte', group: '出国', name: 'PTE Academic', short: 'PTE',
-    date: '', builtin: false, types: ['single', 'gap', 'write', 'speak'],
+    date: '', builtin: false,
+    types: ['single', 'gap', 'listening', 'write', 'speak'],
     note: '全机考，出分快，澳洲认可度高' },
   { id: 'gre', group: '出国', name: 'GRE', short: 'GRE',
     date: '', builtin: false, types: ['single', 'gap', 'write'],
@@ -69,32 +87,39 @@ const EXAMS = [
 
   /* ——— 中学 ——— */
   { id: 'gaokao', group: '中学', name: '高考英语', short: '高考英语',
-    date: '', builtin: false, types: ['single', 'gap', 'cloze', 'write'],
-    note: '多数省份 6 月 8 日下午考英语' },
+    date: '', builtin: false,
+    types: ['listening', 'careful', 'matching', 'cloze', 'gap', 'write'],
+    note: '多数省份 6 月 8 日下午考；各省题型略有差别' },
   { id: 'zhongkao', group: '中学', name: '中考英语', short: '中考英语',
-    date: '', builtin: false, types: ['single', 'gap', 'cloze', 'write'],
-    note: '各地时间不同，以本省安排为准' },
+    date: '', builtin: false,
+    types: ['listening', 'single', 'cloze', 'careful', 'gap', 'write'],
+    note: '各地时间与题型不同，以本省安排为准' },
   { id: 'fce', group: '中学', name: '剑桥通用五级 · FCE', short: '剑桥 FCE',
-    date: '', builtin: false, types: ['single', 'gap', 'matching', 'write'],
+    date: '', builtin: false,
+    types: ['listening', 'careful', 'matching', 'write', 'speak'],
     note: '第三级，约相当于雅思 5.5–6.5' },
 
   /* ——— 小学 / 初中 ——— */
   { id: 'pet', group: '小学·初中', name: '剑桥通用五级 · PET', short: '剑桥 PET',
-    date: '', builtin: false, types: ['single', 'gap', 'matching', 'write'],
+    date: '', builtin: false,
+    types: ['listening', 'careful', 'matching', 'write', 'speak'],
     note: '第二级，约相当于中考到高考之间' },
   { id: 'ket', group: '小学·初中', name: '剑桥通用五级 · KET', short: '剑桥 KET',
-    date: '', builtin: false, types: ['single', 'gap', 'matching'],
+    date: '', builtin: false,
+    types: ['listening', 'single', 'matching', 'write', 'speak'],
     note: '第一级，小学高年级到初中' },
   { id: 'yle', group: '小学·初中', name: '剑桥少儿英语（YLE）', short: '剑桥少儿',
-    date: '', builtin: false, types: ['single', 'gap'],
+    date: '', builtin: false,
+    types: ['listening', 'single', 'write', 'speak'],
     note: 'Starters / Movers / Flyers 三级，幼儿园大班到小学' },
 
   /* ——— 职业 ——— */
   { id: 'bec', group: '职业', name: '商务英语 BEC', short: 'BEC',
-    date: '', builtin: false, types: ['single', 'gap', 'matching', 'write'],
+    date: '', builtin: false,
+    types: ['listening', 'single', 'matching', 'write', 'speak'],
     note: '初级 / 中级 / 高级' },
   { id: 'toeic', group: '职业', name: '托业 TOEIC', short: '托业',
-    date: '', builtin: false, types: ['single', 'audio'],
+    date: '', builtin: false, types: ['listening', 'single'],
     note: '职场英语，只考听力和阅读' },
 ];
 
@@ -499,21 +524,25 @@ function go(r) {
    点进去会说明它是什么、为什么还没做。题型多时导航横向滚动。 */
 const NAV_TYPE_ICON = {
   careful: '📄', matching: '🧩', cloze: '✏️', listen: '🎧',
-  single: '🔤', judge: '⚖️', gap: '⬜', audio: '🎵', write: '✍️', speak: '🗣️',
+  single: '🔤', listening: '🔊', judge: '⚖️', gap: '⬜',
+  write: '✍️', translate: '🈶', speak: '🗣️',
 };
 
 /* 每个题型一句话说清它是什么（"还没做"的页面靠它解释） */
 const TYPE_DESC = {
-  careful: '仔细阅读：一篇短文 + 若干道选择题。',
+  careful:  '仔细阅读：一篇短文 + 若干道选择题。',
   matching: '长篇匹配：几段文字，把句子配到对应段落。',
-  cloze: '选词填空：短文挖空，从备选词里挑。',
-  listen:  '听力听写：机器朗读一句，你把它打出来。',
-  single:  '单选题：给一段材料（或一段音频），从 A/B/C/D 里选一个。雅思听力/阅读、托福、高考、中考的主力题型。',
-  judge:   '判断题：给一句话，判断它和原文「一致 / 相反 / 没提到」（雅思的 T/F/NG、Y/N/NG）。',
-  gap:     '填空题：空格里的词自己写，不从选项里挑。雅思阅读/听力、高考语法填空都用。',
-  audio:   '音频听力：播放真实录音（对话、讲座）再答题。和现在的「听力听写」不同 —— 那个是机器朗读。',
-  write:   '写作：给题目，写一篇，需要批改评分。自动判分很难，要另想办法。',
-  speak:   '口语：要录音和评分，网页里做不完整，放最后。',
+  cloze:    '选词填空：短文挖空，从备选词里挑。',
+  listen:   '听力听写：机器朗读一句，你把它打出来。'
+          + '⚠️ 这是**英语专业四级（TEM-4）**才考的题型，四六级不考听写。',
+  single:   '单选题：给一段材料，从 A/B/C/D 里选一个正确答案。',
+  listening: '听力理解：播放真实录音（新闻、对话、篇章），再选答案。'
+           + '四六级的听力属于这一类 —— 现在站里的「听力听写」是机器朗读 + 让你写，形式不一样。',
+  judge:    '判断题：给一句话，判断它和原文「一致 / 相反 / 没提到」（雅思的 T/F/NG、Y/N/NG）。',
+  gap:      '填空题：空格里的词自己写，不从选项里挑。',
+  write:    '写作：给一个题目，你写一篇短文（四六级是 120~180 词的短文写作，占 15%）。需要批改评分，自动判分很难。',
+  translate: '翻译：给一段中文，翻译成英文。四六级考的是汉译英段落翻译，占 15%，同样需要批改。',
+  speak:    '口语：要录音和评分，网页里做不完整，放最后。',
 };
 
 function navItems() {
