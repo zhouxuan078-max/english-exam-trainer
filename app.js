@@ -1221,8 +1221,6 @@ function vItem(t, i) {
           <div style="white-space:pre-wrap;line-height:1.8">${esc(myText) || '<i>（空）</i>'}</div>
           <div class="meta" style="margin-top:8px">
             <button class="btn ghost sm" data-copyopen="1">复制给 AI 打分</button>
-            <span style="margin-left:6px">会连题目要求、这项的卷面权重一起复制，
-            粘给 AI 它就知道按什么标准评</span>
           </div></div>`;
       }
     }
