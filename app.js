@@ -1,7 +1,19 @@
 /* 四级训练台 — 纯前端，无后端，进度存本地 */
 'use strict';
 
-const EXAM = new Date('2026-12-12T09:00:00+08:00');
+/* 考试场次。
+   四级一年两场（6 月 / 12 月），日期每年不同，**以中国教育考试网公告为准**，
+   不要自己按"第几个周六"去推。想加新场次就往这里加一条；
+   使用者也能在「我的 → 我的考试场次」里自定义日期。 */
+const EXAM_SESSIONS = [
+  { id: '2026-06', date: '2026-06-13', label: '2026 年 6 月',
+    note: '上半年 · 英语四级 上午 9:00-11:20' },
+  { id: '2026-12', date: '2026-12-12', label: '2026 年 12 月',
+    note: '下半年 · 英语四级 上午 9:00-11:20' },
+];
+
+/* 题型分值说明（与具体哪一场无关） */
+const EXAM_STRUCT = '写作 15% · 听力 35% · 阅读 35% · 翻译 15%';
 const S = { bank: null, dict: null, listen: null };
 const LS = {
   get(k, d) { try { const v = localStorage.getItem('cet4:' + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
@@ -161,8 +173,60 @@ function streak() {
   return n;
 }
 
+/* 当前用哪一场：使用者选过就听他的；没选过就取最近的一场未来考试 */
+function examInfo() {
+  const sel = LS.get('exam', null);
+  if (sel && sel.custom && sel.date) {
+    return { date: sel.date, label: '自定义', note: '你自己设定的考试日期', custom: true };
+  }
+  if (sel && sel.id) {
+    const s = EXAM_SESSIONS.find(x => x.id === sel.id);
+    if (s) return { date: s.date, label: s.label, note: s.note, id: s.id };
+  }
+  const t = today();
+  const up = EXAM_SESSIONS.filter(s => s.date >= t);
+  const pick = up.length ? up[0] : EXAM_SESSIONS[EXAM_SESSIONS.length - 1];
+  return { date: pick.date, label: pick.label, note: pick.note, id: pick.id, auto: true };
+}
+
+function examDateObj() {
+  return new Date(examInfo().date + 'T09:00:00+08:00');
+}
+
+function examPassed() {
+  return examDateObj().getTime() < Date.now();
+}
+
 function daysToExam() {
-  return Math.max(0, Math.ceil((EXAM - Date.now()) / 86400000));
+  return Math.max(0, Math.ceil((examDateObj() - Date.now()) / 86400000));
+}
+
+/* 「我的 → 我的考试场次」的选择界面 */
+function vExamPick() {
+  const cur = examInfo();
+  const sel = LS.get('exam', null);
+  const isAuto = !sel || (!sel.id && !sel.custom);
+  const btn = (on, attr, txt) =>
+    `<button class="btn ${on ? '' : 'ghost'} sm" ${attr}>${txt}</button>`;
+  return `
+  <div class="sec">我的考试场次</div>
+  <div class="card tight">
+    <div class="meta">四级一年两场（6 月 / 12 月）。选你报名的那一场，倒计时会跟着变。
+      日期以<b>中国教育考试网</b>公告为准，别按"第几个周六"自己推。</div>
+    <div class="row" style="margin-bottom:6px">
+      ${btn(isAuto, 'data-exam="auto"', '自动（最近一场）')}
+      ${EXAM_SESSIONS.map(s => btn(!!(sel && sel.id === s.id), `data-exam="${s.id}"`, s.label)).join('')}
+      ${btn(!!(sel && sel.custom), 'data-exam="custom"', '自定义日期')}
+    </div>
+    <div id="exampanel" style="display:${(sel && sel.custom) ? 'block' : 'none'};margin-bottom:6px">
+      <input type="date" id="examdate" value="${cur.date}"
+        style="font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
+      <button class="btn sm" data-examsave="1" style="margin-left:6px">保存</button>
+    </div>
+    <div class="meta">当前：<b>${esc(cur.label)}</b> · ${cur.date}${
+      cur.note ? ' · ' + esc(cur.note) : ''}${
+      examPassed() ? ' · <span style="color:var(--warn)">这场已经结束了</span>' : ''}</div>
+  </div>`;
 }
 
 /* ---------- 正文渲染 ----------
@@ -203,7 +267,7 @@ function header() {
   const m = map[route] || map.home;
   $('#hdTitle').textContent = m[0];
   $('#hdSub').textContent = m[1];
-  $('#hdCount').textContent = `距四级 ${daysToExam()} 天`;
+  $('#hdCount').textContent = examPassed() ? '考试已结束' : `距四级 ${daysToExam()} 天`;
   $('#hdClock').textContent = `连续 ${streak()} 天`;
 }
 
@@ -213,8 +277,11 @@ function vHome() {
   const nRead = S.bank.types.reduce((a, t) => a + t.items.length, 0);
   return `
   <div class="card tight">
-    <div class="ttl">距 ${S.bank.exam.date} 四级考试还有 <span style="color:var(--brand)">${daysToExam()}</span> 天</div>
-    <div class="meta" style="margin:6px 0 0">${esc(S.bank.exam.note)}。写作 15% · 听力 35% · 阅读 35% · 翻译 15%。</div>
+    ${examPassed()
+      ? `<div class="ttl">你选的这场考试（${examInfo().date}）已经结束了</div>
+         <div class="meta" style="margin:6px 0 0">去「我的 → 我的考试场次」换成下一场吧。</div>`
+      : `<div class="ttl">距 ${examInfo().date} 四级考试还有 <span style="color:var(--brand)">${daysToExam()}</span> 天</div>
+         <div class="meta" style="margin:6px 0 0">${esc(examInfo().note)}。${EXAM_STRUCT}。</div>`}
   </div>
 
   <div class="stat-grid">
@@ -837,6 +904,8 @@ function vMe() {
     </div>
   </div>` : ''}
 
+  ${vExamPick()}
+
   <div class="sec">错题本</div>
   ${vWrong()}
 
@@ -1113,6 +1182,30 @@ document.addEventListener('click', e => {
     if (confirm('清空我自己导入的题目？（其它数据不受影响）')) {
       LS.set('mybank', null); rebuildBank(); render(); toast('已清空我的题目');
     }
+    return;
+  }
+  /* 我的考试场次 */
+  if (e.target.closest('[data-exam]')) {
+    const v = e.target.closest('[data-exam]').dataset.exam;
+    if (v === 'custom') {
+      const p = $('#exampanel');
+      if (p) p.style.display = 'block';
+      const d = $('#examdate');
+      if (d) d.focus();
+      return;
+    }
+    LS.set('exam', v === 'auto' ? null : { id: v });
+    render();
+    toast(v === 'auto' ? '已切回自动（最近一场）' : '已切换考试场次');
+    return;
+  }
+  if (e.target.closest('[data-examsave]')) {
+    const d = $('#examdate');
+    const val = d ? d.value : '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) { toast('请先选一个日期'); return; }
+    LS.set('exam', { custom: true, date: val });
+    render();
+    toast('已把考试日期设为 ' + val);
     return;
   }
   if (e.target.closest('[data-clearvocab]')) {
