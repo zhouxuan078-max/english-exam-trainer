@@ -1,4 +1,836 @@
 {
  "version": "2026-10-15",
- "types": []
+ "types": [
+  {
+   "type": "careful",
+   "typeName": "仔细阅读",
+   "note": "250-400 词短文 + 5 题单选。四级真题每题 14.2 分，是阅读部分分值最高的题型。",
+   "scorePerQ": 14.2,
+   "items": [
+    {
+     "id": "careful-01",
+     "title": "Why a Short Walk Can Improve Your Thinking",
+     "difficulty": "CET-4",
+     "passage": [
+      "Most students believe that the best way to prepare for an examination is to sit still at a desk for hours. Yet a growing body of research suggests that this habit may work against them. Studies from several universities have found that a brief walk before study can improve attention, memory and creative thinking.",
+      "In one experiment, researchers asked two groups of undergraduates to complete a set of tasks that required original ideas. The first group walked for ten minutes outdoors before starting. The second group sat quietly in the same room for the same amount of time. The walkers produced about twenty per cent more useful ideas, and independent assessors judged their answers to be more original.",
+      "Scientists offer several explanations. Physical movement increases blood flow to the brain and raises the level of chemicals that support the growth of new connections between nerve cells. Walking outdoors adds another benefit: natural light helps to regulate the body clock, which in turn improves sleep, and sleep is the period when newly learned information is sorted and stored.",
+      "There is a further point that is often overlooked. When we sit for a long time, the mind tends to drift towards worries and repetitive thoughts. A short walk interrupts this pattern. The change of scenery gives the brain something new to process, which appears to free mental space for problem solving.",
+      "None of this means that hard work is unnecessary. The studies do not suggest that students can replace study with exercise. Rather, they point to a simple change in routine. Twenty minutes of sitting still is not always more productive than ten minutes of walking followed by ten minutes of focused reading.",
+      "Some teachers have begun to act on these findings. A few schools now schedule short movement breaks between lessons, and report that students return to class more settled. Critics argue that such breaks take time away from the syllabus. But if the remaining time is used more effectively, the trade may well be worth making."
+     ],
+     "questions": [
+      {
+       "q": "What is the common belief that the passage challenges?",
+       "options": [
+        "Students should always study in groups.",
+        "Sitting at a desk for hours is the best way to prepare.",
+        "Examinations should be taken in the morning.",
+        "Exercise should be avoided before study."
+       ],
+       "answer": 1,
+       "explain": "第一段第一句点出学生普遍相信『坐在桌前几小时是最好的备考方式』，紧接着用 Yet 转折说明这个习惯可能有害。"
+      },
+      {
+       "q": "In the experiment, how did the two groups differ?",
+       "options": [
+        "One group walked outdoors while the other sat quietly.",
+        "One group studied for a longer period of time.",
+        "One group was given extra training beforehand.",
+        "One group worked in a different room."
+       ],
+       "answer": 0,
+       "explain": "第二段说明：第一组先户外走十分钟，第二组在同一房间静坐同样时间。差异只在『走』和『坐』。"
+      },
+      {
+       "q": "According to the passage, why is walking outdoors especially helpful?",
+       "options": [
+        "It burns more energy than indoor exercise.",
+        "It gives students a chance to meet other people.",
+        "Natural light helps to regulate the body clock.",
+        "It makes the heart stronger."
+       ],
+       "answer": 2,
+       "explain": "第三段明确指出户外行走的额外好处：自然光有助于调节生物钟，进而改善睡眠。"
+      },
+      {
+       "q": "What does the author say happens when we sit for a long time?",
+       "options": [
+        "Our concentration improves steadily.",
+        "The mind drifts towards worries and repetitive thoughts.",
+        "We save energy for later work.",
+        "New information is stored more efficiently."
+       ],
+       "answer": 1,
+       "explain": "第四段：久坐时思绪容易飘向担忧和重复的念头，短距离散步能打断这个模式。"
+      },
+      {
+       "q": "What is the author's attitude towards movement breaks in schools?",
+       "options": [
+        "Strongly opposed.",
+        "Cautiously supportive.",
+        "Completely uninterested.",
+        "Certain that they will fail."
+       ],
+       "answer": 1,
+       "explain": "末段承认批评者的理由（占用教学时间），但用 But 说明如果剩余时间用得更有效，这个取舍可能是值得的——属于有保留的支持。"
+      }
+     ],
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者按四级难度撰写"
+     }
+    },
+    {
+     "id": "careful-02",
+     "title": "Second-hand Shopping Loses Its Shame",
+     "difficulty": "CET-4",
+     "passage": [
+      "Not long ago, buying used clothes was something many people did quietly, if they did it at all. Today it has become a mainstream activity, and the change says as much about technology as it does about taste.",
+      "Two forces drove the shift. The first was economic. After the financial crisis of 2008, households in many countries looked for ways to spend less without reducing their standard of living. Clothing was an obvious target: the average person wears only a fraction of what hangs in the wardrobe. The second force was environmental. Producing a single cotton T-shirt requires roughly 2,700 litres of water, and the fashion industry is now among those that pollute most heavily. For a generation raised on climate reports, buying second-hand became an easy way to act on values they already held.",
+      "Technology made the market work. Early online platforms were little more than noticeboards, and buyers often had to travel to inspect goods. Mobile applications changed that. Photographs, ratings, prepaid delivery and simple refund rules removed most of the risk. Sellers could clear a wardrobe in an evening; buyers could find a specific item within minutes.",
+      "The results have been striking. In some European countries the resale market has grown several times faster than the market for new clothing. Established brands, which once ignored the trend, now run their own resale services, partly in order to keep customers who would otherwise leave.",
+      "Not everyone is pleased. Critics point out that resale does not so much reduce production as delay it, and that the constant arrival of new must-have items keeps consumption high. There is also a practical concern: cheap fast fashion is often made from low-quality fibres that survive fewer owners, so much of it ends up in landfill in any case.",
+      "These objections are fair, but they miss something. A market that gives an object a second life is not a solution to overconsumption; it is a modest improvement. Modest improvements, repeated across millions of households, are how habits actually change."
+     ],
+     "questions": [
+      {
+       "q": "What does the author say the change in second-hand shopping reflects?",
+       "options": [
+        "A change in taste only.",
+        "Both technology and social attitudes.",
+        "Government policy alone.",
+        "A fall in the quality of new clothes."
+       ],
+       "answer": 1,
+       "explain": "第一段末句：这个变化『既说明技术，也说明品味』，即技术与观念两方面。"
+      },
+      {
+       "q": "According to the passage, what was the economic force behind the shift?",
+       "options": [
+        "A rapid rise in wages.",
+        "Households wanting to spend less without lowering their living standard.",
+        "A worldwide shortage of cotton.",
+        "Cheaper delivery services."
+       ],
+       "answer": 1,
+       "explain": "第二段：2008 年金融危机后，家庭寻找『少花钱但不降低生活水平』的办法。"
+      },
+      {
+       "q": "Why does the passage mention 2,700 litres of water?",
+       "options": [
+        "To show that clothing production is environmentally costly.",
+        "To explain why cotton T-shirts are expensive.",
+        "To describe how cotton is grown in dry regions.",
+        "To compare European and Asian factories."
+       ],
+       "answer": 0,
+       "explain": "这个数字是用来说明服装生产对环境的消耗，从而引出环保这一推动力。"
+      },
+      {
+       "q": "What did mobile applications mainly do for the market?",
+       "options": [
+        "They lowered the price of new clothes.",
+        "They removed most of the risk from buying used goods.",
+        "They replaced physical shops completely.",
+        "They persuaded people to buy more new clothes."
+       ],
+       "answer": 1,
+       "explain": "第三段：照片、评分、预付配送和简单的退款规则『消除了大部分风险』。"
+      },
+      {
+       "q": "What is the author's view of the critics' argument?",
+       "options": [
+        "It is entirely mistaken.",
+        "It is reasonable but does not destroy the value of resale.",
+        "It has not been taken seriously enough.",
+        "It proves that resale does more harm than good."
+       ],
+       "answer": 1,
+       "explain": "末段先承认批评『fair』，再用 but 转折，指出它给出的定性是『modest improvement』，并未否定二手交易的价值。"
+      }
+     ],
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者按四级难度撰写"
+     }
+    },
+    {
+     "id": "careful-03",
+     "title": "The Cost of a Constant Interruption",
+     "difficulty": "CET-4",
+     "passage": [
+      "When a notification appears on a phone screen, most people glance at it within seconds. Few would call this a serious problem. Yet researchers who study attention argue that the habit carries a cost that is easy to miss, because the cost is not paid at the moment of interruption but afterwards.",
+      "In one well-known study, office workers were observed for a full working day. On average they were interrupted roughly every eleven minutes, and after each interruption it took them about twenty-three minutes to return fully to the task they had left. The interruptions themselves were brief — a short message, a quick question. The recovery was not.",
+      "The explanation lies in the way the brain holds a task in mind. To work on something complex, we keep a set of related ideas active, rather like items balanced on a shelf. An interruption does not simply pause this arrangement; it tends to knock part of it down. Rebuilding the shelf takes time, and some pieces are never put back exactly where they were.",
+      "There is a second effect that is less obvious. People who are interrupted frequently begin to work faster and more superficially, as though expecting to be stopped again. They finish more items but make more mistakes, and they report feeling busier while accomplishing less that matters.",
+      "None of this means that technology is harmful in itself. The same devices that interrupt us also allow us to find information within seconds and to work with people far away. The difficulty is that the ability to interrupt has grown much faster than the ability to protect ourselves from it.",
+      "Practical advice follows naturally. Turning off non-essential notifications for a fixed period, keeping a written note of what was interrupted so that it can be resumed deliberately, and grouping similar small tasks together all reduce the number of times the shelf has to be rebuilt. None of these measures requires giving up a phone."
+     ],
+     "questions": [
+      {
+       "q": "What does the passage say about the cost of being interrupted?",
+       "options": [
+        "It is usually paid after the interruption, not during it.",
+        "It is greatest when the interruption is long.",
+        "It disappears once the message is read.",
+        "It has been widely exaggerated by researchers."
+       ],
+       "answer": 0,
+       "explain": "第一段末句明确：代价『不是在被打断的那一刻付出，而是在之后』。"
+      },
+      {
+       "q": "In the study of office workers, how long did it take to return fully to the previous task?",
+       "options": [
+        "About eleven seconds.",
+        "About eleven minutes.",
+        "About twenty-three minutes.",
+        "About one working day."
+       ],
+       "answer": 2,
+       "explain": "第二段：平均每约 11 分钟被打断一次，而每次打断后要花约 23 分钟才完全回到原来的任务。注意 11 是打断的间隔，23 才是恢复时间。"
+      },
+      {
+       "q": "What does the image of a \"shelf\" in the third paragraph describe?",
+       "options": [
+        "The physical desk where a person works.",
+        "The set of related ideas kept active in the mind.",
+        "The list of tasks written down each morning.",
+        "The messages waiting to be answered."
+       ],
+       "answer": 1,
+       "explain": "第三段用『架子上摆放的物品』比喻大脑为完成复杂任务而保持活跃的一整套相关想法。"
+      },
+      {
+       "q": "What is the second effect of frequent interruptions?",
+       "options": [
+        "People become unwilling to use technology.",
+        "People work faster but more superficially.",
+        "People forget how to write by hand.",
+        "People prefer to work alone."
+       ],
+       "answer": 1,
+       "explain": "第四段：经常被打断的人会开始干得更快更表面，完成的项目更多但错误也更多。"
+      },
+      {
+       "q": "What is the author's attitude towards technology?",
+       "options": [
+        "Technology is harmful in itself.",
+        "Technology should be given up entirely.",
+        "Technology is useful but needs to be managed.",
+        "Technology has no effect on attention."
+       ],
+       "answer": 2,
+       "explain": "第五段：作者明确说这不意味着技术本身有害，问题在于『打断别人的能力』增长得比『保护自己的能力』快得多——即要用管理手段应对。"
+      }
+     ],
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者按四级难度撰写"
+     }
+    },
+    {
+     "id": "careful-04",
+     "title": "Why Libraries Are Still Full",
+     "difficulty": "CET-4",
+     "passage": [
+      "Whenever a city announces spending on a new library, someone asks the same question: in an age when almost any book can be read on a phone, why build a building to hold them? The question sounds practical. The evidence, however, points the other way.",
+      "Library visits in many countries have risen over the past decade, and the busiest libraries are often in the poorest districts rather than the richest. This pattern is difficult to explain if libraries were mainly places for borrowing books. It makes sense if we notice what else they provide.",
+      "A library is one of the few indoor places a person may enter without buying anything. For someone in temporary housing, it offers a warm seat, a clean toilet and an address for correspondence. For a student in a crowded flat, it offers the quiet that home does not supply. For an older person living alone, it offers company that costs nothing and demands nothing.",
+      "Libraries have also become the place where people meet the state. Forms that can no longer be completed on paper, job applications that must be submitted online and appointments that must be booked through a website all assume a computer and a reliable connection. Staff are frequently the only help available to those who have neither.",
+      "This is not to say that libraries have no problems. Opening hours are often too short for people who work during the day, buildings may be poorly placed relative to the neighbourhoods that need them most, and funding tends to fall in exactly the years when demand rises.",
+      "But the shelves were never the whole point. What a library offers, and what no screen has yet replaced, is a place that a person may occupy without having to justify the fact of being there."
+     ],
+     "questions": [
+      {
+       "q": "What question does the passage begin with?",
+       "options": [
+        "Why libraries cost so much to build.",
+        "Why we need buildings for books that can be read on phones.",
+        "Why fewer people read books than before.",
+        "Why cities spend money on public transport."
+       ],
+       "answer": 1,
+       "explain": "第一段：既然手机就能读书，为什么还要盖房子来藏书。"
+      },
+      {
+       "q": "What pattern does the author find hard to explain at first?",
+       "options": [
+        "The busiest libraries are in the poorest districts.",
+        "Library visits have fallen everywhere.",
+        "Richer districts build more libraries.",
+        "Most visitors come only at weekends."
+       ],
+       "answer": 0,
+       "explain": "第二段：如果图书馆主要用来借书，就很难解释为什么『最忙的图书馆往往在最穷的区』。"
+      },
+      {
+       "q": "According to the third paragraph, what does a library provide?",
+       "options": [
+        "Cheap second-hand books for sale.",
+        "An indoor place a person may enter without buying anything.",
+        "Free training courses for job seekers.",
+        "A quiet workplace for government staff."
+       ],
+       "answer": 1,
+       "explain": "第三段开宗明义：图书馆是少数『不买东西也能进去』的室内场所，随后举了三类人作例证。"
+      },
+      {
+       "q": "Why does the author say staff are important?",
+       "options": [
+        "They decide which books should be kept.",
+        "They help people who have no computer or connection.",
+        "They organise events for older residents.",
+        "They repair the buildings."
+       ],
+       "answer": 1,
+       "explain": "第四段：许多事务已改成必须网上办理，而工作人员常常是那些既没电脑也没有网络的人唯一能得到的帮助。"
+      },
+      {
+       "q": "What is the author's final point?",
+       "options": [
+        "Libraries should stop lending books.",
+        "Libraries offer a place one may occupy without justifying oneself.",
+        "Libraries will soon be replaced by screens.",
+        "Libraries should charge a small entrance fee."
+       ],
+       "answer": 1,
+       "explain": "末段点题：书架从来不是全部意义所在，图书馆提供的是一个『不需要为自己的存在作出解释』的地方。"
+      }
+     ],
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者按四级难度撰写"
+     }
+    }
+   ]
+  },
+  {
+   "type": "matching",
+   "typeName": "长篇匹配",
+   "note": "分段长文 + 句子配段。真题每题 7.1 分。部分段落不对应任何句子。",
+   "scorePerQ": 7.1,
+   "items": [
+    {
+     "id": "match-01",
+     "title": "Learning a Language as an Adult",
+     "difficulty": "CET-4",
+     "paragraphs": [
+      {
+       "letter": "A",
+       "text": "Many adults begin a new language with a fixed belief: that they have missed the best years for learning, and that whatever they achieve now will be second-rate. This belief is not harmless. Studies show that learners who expect to fail practise less, avoid speaking, and give up sooner."
+      },
+      {
+       "letter": "B",
+       "text": "The evidence, however, is more encouraging than the belief suggests. When adults and children are given the same amount of instruction, adults usually make faster progress at the beginning. They already understand how sentences are built, they can look up a word in seconds, and they can plan their own practice."
+      },
+      {
+       "letter": "C",
+       "text": "Where children clearly hold the advantage is sound. Young learners who hear a language every day absorb its rhythm and its individual sounds without effort, and they end up sounding like native speakers. Adults who begin later almost always keep a trace of an accent, though they can still become perfectly easy to understand."
+      },
+      {
+       "letter": "D",
+       "text": "The largest difficulty for most adult learners is not ability but time. Work, family and other duties leave few clear hours, and a language needs regular contact rather than occasional long sessions. An hour once a week produces far less than fifteen minutes a day."
+      },
+      {
+       "letter": "E",
+       "text": "Adults can use an advantage that children lack: they can study rules directly. A learner who understands why a particular tense is used may master it faster than one who meets it only in conversation. Grammar, often seen as a burden, can therefore become a tool."
+      },
+      {
+       "letter": "F",
+       "text": "Children, by contrast, generally learn without being taught. They are surrounded by the language for thousands of hours and gradually work out its patterns. They cannot explain what they know, but they apply it correctly. Adults rarely have that much exposure, so they need other routes."
+      },
+      {
+       "letter": "G",
+       "text": "Motivation matters more than most people expect. Learners who begin to think of themselves as people who speak the language — who order food in it, read the news in it, joke in it — practise far more than those who treat it as a school subject. Identity, not talent, often decides who continues."
+      },
+      {
+       "letter": "H",
+       "text": "Another practical factor is the goal. A learner who aims vaguely at becoming fluent has no way of knowing whether today's effort counted. A learner who aims at holding a five-minute conversation about a familiar topic can see the progress and is far more likely to keep going."
+      },
+      {
+       "letter": "I",
+       "text": "It is worth adding that progress is rarely smooth. Learners commonly move forward for weeks and then seem to stand still. This is normal: the brain continues to work on material that no longer shows an obvious improvement. Knowing this in advance prevents many people from quitting at exactly the wrong moment."
+      }
+     ],
+     "statements": [
+      {
+       "s": "Adults often begin a new language believing that the best period for learning has already passed.",
+       "answer": "A"
+      },
+      {
+       "s": "In the early stages, adults frequently make faster progress than children given the same amount of teaching.",
+       "answer": "B"
+      },
+      {
+       "s": "Children who hear a language every day pick up its sounds without conscious effort.",
+       "answer": "C"
+      },
+      {
+       "s": "The biggest obstacle for most adult learners is finding regular time to study.",
+       "answer": "D"
+      },
+      {
+       "s": "Adults can benefit from studying grammar rules in a direct way.",
+       "answer": "E"
+      },
+      {
+       "s": "Learners who come to see the language as part of who they are tend to practise more.",
+       "answer": "G"
+      },
+      {
+       "s": "Having a clear and limited goal makes it easier to notice one's own progress.",
+       "answer": "H"
+      },
+      {
+       "s": "Periods without visible improvement are a normal part of the learning process.",
+       "answer": "I"
+      }
+     ],
+     "unused": [
+      "F"
+     ],
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者按四级难度撰写"
+     }
+    }
+   ]
+  },
+  {
+   "type": "cloze",
+   "typeName": "选词填空",
+   "note": "短文挖 10 空 + 15 个备选词。真题每题 3.55 分，建议最后做。",
+   "scorePerQ": 3.55,
+   "items": [
+    {
+     "id": "cloze-01",
+     "title": "Gardens on the Roof",
+     "difficulty": "CET-4",
+     "passage": "In many large cities, unused space can be found on the roofs of buildings. Some communities have begun to turn these flat, empty areas into gardens, and the results have surprised even the people who {{1}} them.\n\nA rooftop garden is not simply a pleasant hobby. In summer, plants {{2}} much of the sunlight that would otherwise heat the building below, so the rooms stay cooler and less electricity is needed for air conditioning. The soil also {{3}} rainwater, which reduces the pressure on city drains during heavy storms.\n\nSupporters point to social benefits as well. Residents who rarely spoke to one another may {{4}} over the fence while watering their vegetables, and small children who have never seen food grow can {{5}} how it happens. In some neighbourhoods the garden has become a place where people of very different backgrounds meet on {{6}} ground.\n\nThere are, of course, {{7}} difficulties. Roofs must be strong enough to carry the weight of soil and water, and a leak can be extremely expensive to repair. Watering a garden several floors above the street is {{8}}, and in dry seasons it may be impossible.\n\nEven so, the idea continues to spread. Where local governments {{9}} part of the cost, the number of such gardens has risen quickly. For tenants in crowded districts, a few square metres of green space can {{10}} change how a whole building feels.",
+     "options": [
+      "absorb",
+      "borrow",
+      "chat",
+      "common",
+      "completely",
+      "cover",
+      "create",
+      "demanding",
+      "identical",
+      "observe",
+      "practical",
+      "rarely",
+      "refuses",
+      "retains",
+      "silent"
+     ],
+     "answers": {
+      "1": "create",
+      "2": "absorb",
+      "3": "retains",
+      "4": "chat",
+      "5": "observe",
+      "6": "common",
+      "7": "practical",
+      "8": "demanding",
+      "9": "cover",
+      "10": "completely"
+     },
+     "explains": {
+      "1": "who 引导定语从句，先行词 the people 为复数，用动词原形 create。",
+      "2": "plants 是复数主语，用动词原形；absorb 意为「吸收」，与后文「减少制热」逻辑一致。",
+      "3": "主语 The soil 为单数，需第三人称单数 retains（保持、留住水分）。",
+      "4": "情态动词 may 后接动词原形；chat over the fence 意为「隔着栅栏聊天」。",
+      "5": "can 后接动词原形；observe 意为「观察到、看到」。",
+      "6": "common ground 是固定搭配，意为「共同点、共同立场」。",
+      "7": "practical difficulties 是常见搭配，意为「实际困难」。",
+      "8": "demanding 意为「费力的、要求高的」，形容顶楼浇水这件事。",
+      "9": "governments 为复数，用动词原形；cover the cost 意为「承担费用」。",
+      "10": "修饰动词 change 需用副词；completely change 意为「彻底改变」。"
+     },
+     "distractors": {
+      "borrow": "语义不通：政府不会「借」这笔费用，且与 cover 的搭配习惯不符。",
+      "identical": "identical 意为「完全相同的」，与 difficulties、ground 均不能搭配。",
+      "rarely": "rarely 意为「很少」，与句意（绿色空间确实能彻底改变感受）相反。",
+      "refuses": "语法上只可能填第 3 空，但「土壤拒绝雨水」语义不通。",
+      "silent": "silent 意为「沉默的」，无法修饰 difficulties。"
+     },
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者按四级难度撰写"
+     }
+    }
+   ]
+  },
+  {
+   "type": "single",
+   "typeName": "单项选择",
+   "note": "",
+   "scorePerQ": 0,
+   "items": [
+    {
+     "id": "single-01",
+     "title": "词义辨析（句子填空）",
+     "difficulty": "CET-4",
+     "questions": [
+      {
+       "q": "The committee decided to ______ the meeting until next week, as several members were away on business.",
+       "options": [
+        "postpone",
+        "preserve",
+        "propose",
+        "promote"
+       ],
+       "answer": 0,
+       "explain": "postpone 推迟；preserve 保存；propose 提议；promote 提升、促进。句意是「因为几位成员出差，委员会决定把会议推迟到下周」，只有 postpone 讲得通。"
+      },
+      {
+       "q": "She has a good ______ for detail, which makes her an excellent editor.",
+       "options": [
+        "ear",
+        "eye",
+        "hand",
+        "head"
+       ],
+       "answer": 1,
+       "explain": "have an eye for sth 是固定搭配，意思是「对……有眼光、有辨别力」。a good ear for music（对音乐敏感）是另一种搭配，但和 detail 不搭。"
+      },
+      {
+       "q": "The new policy is likely to ______ small businesses more than large ones.",
+       "options": [
+        "affect",
+        "effect",
+        "effort",
+        "afford"
+       ],
+       "answer": 0,
+       "explain": "affect 是动词，意为「影响」；effect 通常作名词（效果、影响）；effort 努力；afford 负担得起。这里需要动词，所以选 affect。"
+      },
+      {
+       "q": "He apologized ______ arriving late, explaining that his train had been cancelled.",
+       "options": [
+        "of",
+        "to",
+        "for",
+        "with"
+       ],
+       "answer": 2,
+       "explain": "apologize for doing sth 是固定搭配，「为做了某事道歉」。apologize to sb 后面接的是人，不是事。"
+      }
+     ],
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者撰写"
+     }
+    },
+    {
+     "id": "single-02",
+     "title": "短文理解",
+     "difficulty": "CET-4",
+     "passage": [
+      "Many people assume that a longer working day means more output. Recent studies, however, suggest that the opposite is often true. When employees regularly work more than fifty hours a week, the number of mistakes rises sharply, and the quality of decisions falls. After a certain point, each extra hour adds almost nothing to what is actually finished.",
+      "The reason lies in how attention works. Unlike a muscle that can be pushed to exhaustion and then recover quickly, attention does not simply return to its full strength after a short break. What recovers fastest is not energy itself but the ability to notice errors. People who keep working while tired feel busy, yet they lose the very judgement that makes their work useful."
+     ],
+     "questions": [
+      {
+       "q": "What does the passage say happens when people work more than fifty hours a week?",
+       "options": [
+        "They finish noticeably more work.",
+        "Mistakes increase and decision quality drops.",
+        "They become more confident about their choices.",
+        "Their physical strength improves over time."
+       ],
+       "answer": 1,
+       "explain": "第一段明确说：每周超过五十小时，错误数量急剧上升、决策质量下降。这正是 B 项。"
+      },
+      {
+       "q": "What is the writer's main point about attention?",
+       "options": [
+        "It works much like a muscle that needs rest.",
+        "It can be trained to work without limits.",
+        "It loses its ability to spot mistakes when tired.",
+        "It matters less than the number of hours worked."
+       ],
+       "answer": 2,
+       "explain": "第二段说注意力「不像肌肉」，而且最慢恢复的正是「发现错误的能力」。作者的核心观点是疲劳会让人失去判断力，所以选 C。A 是作者明确否定的说法。"
+      },
+      {
+       "q": "Why do tired workers still feel busy?",
+       "options": [
+        "They are given more tasks than usual.",
+        "They spend longer on each small decision.",
+        "They mistake activity for useful output.",
+        "They are afraid to stop working."
+       ],
+       "answer": 2,
+       "explain": "原文最后一句说「人们疲劳时继续工作会觉得自己很忙，却失去了让工作有价值的那种判断力」——即在用「忙」代替「有效产出」，故选 C。"
+      }
+     ],
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者撰写"
+     }
+    }
+   ]
+  },
+  {
+   "type": "judge",
+   "typeName": "判断题",
+   "note": "",
+   "scorePerQ": 0,
+   "items": [
+    {
+     "id": "judge-01",
+     "title": "共享单车的第一次退潮",
+     "difficulty": "IELTS 5.5",
+     "options": [
+      "True",
+      "False",
+      "Not Given"
+     ],
+     "passage": [
+      "When dockless shared bikes first appeared in Chinese cities around 2016, the growth was astonishing. Within two years, more than twenty companies were operating, and the total number of bicycles on the streets passed twenty million. Riders could leave a bike almost anywhere, unlock it with a phone, and pay a few coins for half an hour.",
+      "The problems arrived faster than anyone expected. Because the bikes had no fixed stations, they were soon blocking subway entrances, shop doorways and even pavements reserved for blind pedestrians. Local governments began to cap the number of bikes each company could place in a district, and several cities banned new bikes altogether. By 2019 most of the smaller companies had closed, and the two largest survivors had raised their prices.",
+      "What the industry left behind was not nothing. City planners now treat shared bikes as part of the public transport system rather than a temporary fashion, and several cities have built dedicated parking areas for them. The surviving companies also learned that maintenance, not expansion, decides whether a bike lasts more than a year."
+     ],
+     "questions": [
+      {
+       "q": "More than twenty million shared bikes were on the streets within two years of the first appearance of dockless bikes.",
+       "answer": 0,
+       "explain": "第一段说「两年之内……街上自行车总数超过两千万」。数字和说法一致，选 True。"
+      },
+      {
+       "q": "The first shared bikes had to be returned to fixed stations.",
+       "answer": 1,
+       "explain": "第一段明确说这些是「无桩（dockless）」单车，「骑行者可以把车停在任何地方」。与原文相反，选 False。"
+      },
+      {
+       "q": "Local governments lowered the price riders had to pay.",
+       "answer": 2,
+       "explain": "原文只提到政府限制每家公司在某个区域投放的车辆数量，没有提到政府干预价格。提价的是幸存的两家公司，而且与政府无关，所以是 Not Given。"
+      },
+      {
+       "q": "The two largest surviving companies raised their prices.",
+       "answer": 0,
+       "explain": "第二段最后一句：到 2019 年，两家最大的幸存公司已经提价。说法一致，选 True。"
+      }
+     ],
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者撰写"
+     }
+    },
+    {
+     "id": "judge-02",
+     "title": "关于睡眠的一个常见误解",
+     "difficulty": "IELTS 6",
+     "options": [
+      "True",
+      "False",
+      "Not Given"
+     ],
+     "passage": [
+      "Almost everyone has been told that eight hours of sleep is the ideal. The figure is convenient, but it has no single scientific source. It became popular in the early twentieth century largely because it matched the length of the working day that employers wanted, not because researchers had measured how much sleep people actually need.",
+      "What research does show is that the amount varies considerably between individuals. Some people function well on six hours for decades; others genuinely need nine. Age matters too: teenagers need more sleep than they did as children, while people over sixty often sleep less deeply and wake earlier.",
+      "The more useful question, according to sleep scientists, is not how many hours you get but whether you wake at roughly the same time each day. A regular schedule, even a short one, tends to produce better results than a long but irregular one."
+     ],
+     "questions": [
+      {
+       "q": "The idea of eight hours of sleep came from a single scientific study.",
+       "answer": 1,
+       "explain": "第一段说这个数字「没有单一的科学来源」，它之所以流行，主要是因为符合当时雇主希望的工作日长度。说它「来自一项科学研究」与原文相反，选 False。"
+      },
+      {
+       "q": "Some people perform well on six hours of sleep for many years.",
+       "answer": 0,
+       "explain": "第二段：「有些人几十年只睡六小时也运转良好」。说法一致，选 True。"
+      },
+      {
+       "q": "Teenagers need less sleep than younger children.",
+       "answer": 1,
+       "explain": "第二段说「青少年比他们小时候需要更多睡眠」。与选项说法相反，选 False。"
+      },
+      {
+       "q": "Sleep scientists recommend a particular bedtime for adults.",
+       "answer": 2,
+       "explain": "第三段说的是「醒来时间大致固定」比睡多久更重要，并没有推荐具体的就寝时间。原文未提及，选 Not Given。"
+      }
+     ],
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者撰写"
+     }
+    }
+   ]
+  },
+  {
+   "type": "listening",
+   "typeName": "听力理解",
+   "note": "",
+   "scorePerQ": 0,
+   "items": [
+    {
+     "id": "listen-01",
+     "title": "图书馆延长开放时间的通知",
+     "difficulty": "CET-4",
+     "script": "This is a recorded announcement from the university library. Starting next Monday, the main reading room will stay open until midnight from Monday to Thursday, two hours later than before. The change follows a survey in which more than sixty percent of students said they needed a quiet place to study after their evening classes. Please note that the borrowing desk will still close at eight in the evening, so plan ahead if you need to check out books. The cafe on the ground floor will remain open until eleven, but the group study rooms will close at ten, as before. If you have any questions about the new hours, speak to the staff at the front desk or send an email to library at university dot edu.",
+     "questions": [
+      {
+       "q": "The main reading room will close at midnight on which days?",
+       "options": [
+        "Monday to Thursday",
+        "Every day of the week",
+        "Friday and Saturday only",
+        "Monday to Friday"
+       ],
+       "answer": 0,
+       "explain": "通知里说「从下周一开始，主阅览室周一到周四开放到午夜」。周五到周日不在这个范围内。"
+      },
+      {
+       "q": "Why is the library making this change?",
+       "options": [
+        "The building is being repaired during the day.",
+        "Most students asked for a quiet place to study in the evening.",
+        "The borrowing desk is moving to a larger room.",
+        "The cafe asked the library to stay open longer."
+       ],
+       "answer": 1,
+       "explain": "「这项调整源于一次调查，超过百分之六十的学生说他们晚上下课后需要一个安静的学习场所」——对应 B 项。"
+      },
+      {
+       "q": "What will still close at eight in the evening?",
+       "options": [
+        "The group study rooms",
+        "The ground floor cafe",
+        "The borrowing desk",
+        "The front desk"
+       ],
+       "answer": 2,
+       "explain": "「借书台仍然在晚上八点关闭」，需要借书就要提前安排。研讨室十点关、咖啡厅十一点关，都不是八点。"
+      }
+     ],
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者撰写"
+     }
+    },
+    {
+     "id": "listen-02",
+     "title": "咖啡与注意力的小实验",
+     "difficulty": "CET-4",
+     "script": "In today's psychology lecture we look at a simple experiment on attention. Volunteers were divided into two groups. One group drank a normal cup of coffee, and the other drank a cup that tasted identical but contained no caffeine. Both groups then completed the same computer task, which asked them to press a key as soon as a letter appeared. The surprising result was that the two groups performed almost exactly the same. What differed was how they felt: the group who believed they had drunk coffee reported feeling more alert, even when they had not. The researchers concluded that a large part of the effect people notice after coffee may come from expectation rather than from the drink itself. Next week we will look at what happens when the same experiment is repeated in the afternoon, when people are naturally sleepier.",
+     "questions": [
+      {
+       "q": "What did the second group drink?",
+       "options": [
+        "A cup of tea",
+        "Coffee with less caffeine",
+        "A drink that tasted the same but had no caffeine",
+        "Nothing at all"
+       ],
+       "answer": 2,
+       "explain": "「另一组喝的是味道完全相同、但不含咖啡因的一杯」。这是控制变量的关键设计。"
+      },
+      {
+       "q": "What was the main result of the experiment?",
+       "options": [
+        "The coffee group was much faster.",
+        "Both groups performed about the same.",
+        "Neither group could finish the task.",
+        "The second group made more mistakes."
+       ],
+       "answer": 1,
+       "explain": "「出乎意料的是，两组的表现几乎完全一样」。注意题干问的是「表现」，不是「感觉」。"
+      },
+      {
+       "q": "What will the lecturer discuss next week?",
+       "options": [
+        "How much caffeine is safe each day",
+        "Repeating the experiment in the afternoon",
+        "Why coffee improves memory",
+        "How to design a better computer task"
+       ],
+       "answer": 1,
+       "explain": "最后一句：「下周我们看同一个实验在下午重复时会发生什么，那时人本来就更容易困。」"
+      }
+     ],
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者撰写"
+     }
+    }
+   ]
+  },
+  {
+   "type": "quant",
+   "typeName": "数学",
+   "note": "",
+   "scorePerQ": 0,
+   "items": [
+    {
+     "id": "quant-01",
+     "title": "数量推理",
+     "difficulty": "GRE",
+     "options": [
+      "Quantity A is greater",
+      "Quantity B is greater",
+      "The two quantities are equal",
+      "The relationship cannot be determined from the information given"
+     ],
+     "questions": [
+      {
+       "q": "Quantity A: 2^5\nQuantity B: 5^2",
+       "answer": 0,
+       "explain": "2^5 = 2×2×2×2×2 = 32；5^2 = 25。32 > 25，所以 A 更大。这类题别凭「5 比 2 大」的感觉，直接算。"
+      },
+      {
+       "q": "n is an integer and n² = 16.\nQuantity A: n\nQuantity B: 4",
+       "answer": 3,
+       "explain": "n² = 16 时 n 可以是 4，也可以是 −4（整数包括负整数）。n = 4 时两数相等，n = −4 时 B 更大，结果不唯一，所以选 D。"
+      },
+      {
+       "q": "A train covers 240 kilometres in 2 hours and 30 minutes at a constant speed. What is its average speed in kilometres per hour?",
+       "options": [
+        "84",
+        "90",
+        "96",
+        "100"
+       ],
+       "answer": 2,
+       "explain": "2 小时 30 分 = 2.5 小时。240 ÷ 2.5 = 96 公里/小时。"
+      },
+      {
+       "q": "Which of the following fractions is the largest?",
+       "options": [
+        "3/5",
+        "5/8",
+        "7/12",
+        "4/7"
+       ],
+       "answer": 1,
+       "explain": "通分或化成小数比较：3/5 = 0.6，5/8 = 0.625，7/12 ≈ 0.583，4/7 ≈ 0.571。最大的是 5/8。"
+      }
+     ],
+     "origin": "original",
+     "source": {
+      "license": "原创",
+      "desc": "由本工具作者撰写"
+     }
+    }
+   ]
+  }
+ ]
 }

@@ -31,16 +31,21 @@ const QTYPES = {
   matching:  { name: '长篇匹配', impl: true,  unit: '篇' },
   cloze:     { name: '选词填空', impl: true,  unit: '篇' },
   listen:    { name: '听力听写', impl: true,  unit: '句' },
+  single:    { name: '单项选择', impl: true,  unit: '组' },
+  judge:     { name: '判断题',   impl: true,  unit: '组' },
+  listening: { name: '听力理解', impl: true,  unit: '组' },
+  quant:     { name: '数学',     impl: true,  unit: '组' },
   /* —— 还没实现 —— */
-  single:    { name: '单项选择', impl: false, unit: '题' },
-  listening: { name: '听力理解', impl: false, unit: '题' },
-  judge:     { name: '判断题',   impl: false, unit: '题' },
   gap:       { name: '填空题',   impl: false, unit: '题' },
   write:     { name: '写作',     impl: false, unit: '篇' },
   translate: { name: '翻译',     impl: false, unit: '题' },
   speak:     { name: '口语',     impl: false, unit: '题' },
-  quant:     { name: '数学',     impl: false, unit: '题' },
 };
+
+/* 这四种题型共用同一个答题界面：材料（可无）+ 若干道带选项的小题。
+   判断题的 T/F/NG、GRE 数量比较的四个固定选项，都是"选项写在题目上"，
+   所以题目自带的 options 优先，其次是整条题目的 options。 */
+const CHOICE_TYPES = ['single', 'judge', 'listening', 'quant'];
 
 /* 考试清单。只收**大学阶段及以上**的考试（本科 / 研究生 / 出国 / 职场），不含中小学。
 
@@ -289,6 +294,31 @@ function typesOf(ex, vid) {
     });
   });
   return seen;
+}
+
+/* 某个题型在当前考试里的规格（题量 / 占比 / 分值 / 细分）。
+   注意 drill：雅思阅读那行官方只给"40 题 / 25%"，实际要练选择/判断/填空，
+   所以按 drill 反查时要能命中那一行。 */
+function paperRowOf(typeId, ex, vid) {
+  const rows = paperOf(ex, vid).filter(r =>
+    r.t === typeId || (r.drill || []).indexOf(typeId) >= 0);
+  if (!rows.length) return null;
+  const sum = k => rows.reduce((n, r) => n + (r[k] || 0), 0);
+  return {
+    label: rows[0].label,
+    count: sum('count'), pct: sum('pct'), score: sum('score'),
+    // drilling = 官方没单独给这个题型数字（雅思阅读），数字属于整行
+    drilling: rows[0].t !== typeId,
+  };
+}
+
+/* 这一题答对折算多少分 = 该题型的分值 ÷ 题量。
+   四级：仔细阅读 142÷10 = 14.2、选词填空 35.5÷10 = 3.55 —— 与官方折合分一致。
+   雅思/多邻国那种官方不给分项分值的返回 null，页面就不显示折算分了。 */
+function scorePerQOf(typeId, ex, vid) {
+  const r = paperRowOf(typeId, ex, vid);
+  if (r && r.count > 0 && r.score > 0) return r.score / r.count;
+  return null;
 }
 
 /* 表尾「合计」。用考试自己声明的总数 —— 它才是这场考试的卷面总量；
@@ -788,10 +818,10 @@ const TYPE_DESC = {
   cloze:    '选词填空：短文挖空，从备选词里挑。',
   listen:   '听力听写：机器朗读一句，你把它打出来。'
           + '⚠️ 这是**英语专业四级（TEM-4）**才考的题型，四六级不考听写。',
-  single:   '单选题：给一段材料，从 A/B/C/D 里选一个正确答案。',
-  listening: '听力理解：播放真实录音（新闻、对话、篇章），再选答案。'
-           + '四六级的听力属于这一类 —— 现在站里的「听力听写」是机器朗读 + 让你写，形式不一样。',
-  judge:    '判断题：给一句话，判断它和原文「一致 / 相反 / 没提到」（雅思的 T/F/NG、Y/N/NG）。',
+  single:   '单项选择：给一段材料或一个句子，从选项里选一个正确答案。',
+  listening: '听力理解：先播一段录音，再回答后面的选择题。'
+           + '站里用的是浏览器语音合成，不是考场原音。',
+  judge:    '判断题：判断每句话和原文是「一致 / 相反 / 没提到」（雅思的 T/F/NG）。',
   gap:      '填空题：空格里的词自己写，不从选项里挑。',
   write:    '写作：给一个题目，你写一篇短文（四六级是 120~180 词的短文写作，占 15%）。需要批改评分，自动判分很难。',
   translate: '翻译：给一段中文，翻译成英文。四六级考的是汉译英段落翻译，占 15%，同样需要批改。',
@@ -849,9 +879,12 @@ function header() {
     const t = S.bank && S.bank.types.find(x => x.type === id);
     if (!q.impl) sub = '这个题型还没做';
     else if (id === 'listen') sub = '浏览器朗读，跟读默写';
-    else sub = (t && t.items.length)
-      ? (t.items.length + ' 道 · 每题 ' + (t.scorePerQ || 0) + ' 分')
-      : '还没有题目';
+    else if (!t || !t.items.length) sub = '还没有题目';
+    else {
+      const perQ = scorePerQOf(id);
+      sub = t.items.length + ' ' + ((QTYPES[id] || {}).unit || '篇')
+        + (perQ ? ' · 每题 ' + (+perQ.toFixed(2)) + ' 分' : '');
+    }
   }
   $('#hdTitle').textContent = title;
   $('#hdSub').textContent = sub;
@@ -869,13 +902,9 @@ function vHome() {
   <div class="card tight">
     ${(() => {
       const cur = examInfo(), dn = daysToExam();
-      if (dn === null) {
-        return `<div class="ttl">${esc(cur.name)}</div>
-          <div class="meta" style="margin:6px 0 0">还没设考试日期 —— 去「我的 → 我的考试」填一下，这里就有倒计时了。</div>`;
-      }
+      if (dn === null) return `<div class="ttl">${esc(cur.name)}</div>`;
       if (examPassed()) {
-        return `<div class="ttl">${esc(cur.short)}（${cur.date}）已经结束了</div>
-          <div class="meta" style="margin:6px 0 0">去「我的 → 我的考试」改成你要考的下一场。</div>`;
+        return `<div class="ttl">${esc(cur.short)}（${cur.date}）已结束</div>`;
       }
       return `<div class="ttl">距 ${esc(cur.short)} 还有 <span style="color:var(--brand)">${dn}</span> 天</div>
         <div class="meta" style="margin:6px 0 0">${cur.date}${
@@ -997,25 +1026,43 @@ function vItem(t, i) {
   const done = !!submitted;
   // 关键：未提交时要用"作答草稿"渲染，否则点了选项界面不会显示选中
   const d = done ? { a: submitted.a || {}, p: submitted.p || {} } : ensureDraft(t, i);
+  const per = scorePerQOf(t.type);
   let h = `<div class="card">
     <div class="ttl">${esc(it.title || '（无标题）')}</div>
-    <div class="meta">${originTag(it)}第 ${i + 1} / ${t.items.length} 篇 · 每题 ${t.scorePerQ} 分</div>
+    <div class="meta">${originTag(it)}第 ${i + 1} / ${t.items.length} ${
+      esc((QTYPES[t.type] || {}).unit || '篇')}${
+      per ? ' · 每题 ' + (+per.toFixed(2)) + ' 分' : ''}</div>
     ${srcLine(it)}`;
 
-  if (t.type === 'careful') {
-    h += `<div class="passage">${it.passage.map(p => '<p>' + wrap(p) + '</p>').join('')}</div></div><div class="card">`;
+  if (t.type === 'careful' || CHOICE_TYPES.indexOf(t.type) >= 0) {
+    // 听力：先播放，答完才给原文
+    if (it.script) {
+      h += `<div class="audio-card" style="padding:18px 12px 14px">
+        <button class="bigbtn" id="playBtn" data-playq="1">▶</button>
+        <div class="meta" style="margin:0;text-align:center">点一下播放录音</div>
+      </div>`;
+    }
+    const paras = [].concat(it.passage || []);
+    if (paras.length) {
+      h += `<div class="passage">${paras.map(p => '<p>' + wrap(p) + '</p>').join('')}</div>`;
+    }
+    h += `</div><div class="card">`;
     it.questions.forEach((q, qi) => {
       const a = d.a[qi];
+      const opts = q.options || it.options || [];
       h += `<div class="q"><div class="qt">${qi + 1}. ${esc(q.q)}</div>`;
-      q.options.forEach((o, oi) => {
+      opts.forEach((o, oi) => {
         let cls = 'opt';
         if (done) { if (oi === q.answer) cls += ' ok'; else if (a === oi) cls += ' bad'; }
         else if (a === oi) cls += ' sel';
         h += `<div class="${cls}" data-pick="${qi}:${oi}"><span class="k">${'ABCD'[oi]}</span><span>${wrap(o)}</span></div>`;
       });
-      if (done) h += `<div class="exp">正确答案 <b>${'ABCD'[q.answer]}</b>。${esc(q.explain)}</div>`;
+      if (done) h += `<div class="exp">正确答案 <b>${'ABCD'[q.answer]}</b>。${esc(q.explain || '')}</div>`;
       h += `</div>`;
     });
+    if (done && it.script) {
+      h += `<div class="exp" style="margin-top:12px"><b>听力原文</b><br>${esc(it.script)}</div>`;
+    }
     h += resultRow(t, i, it.questions.length, done, d);
   } else if (t.type === 'matching') {
     h += it.paragraphs.map(p => `<div class="para"><span class="lt">${p.letter}</span>${wrap(p.text)}</div>`).join('');
@@ -1081,12 +1128,19 @@ function resultRow(t, i, total, done, d) {
   let right = 0;
   const it = t.items[i];
   if (t.type === 'cloze') { for (let n = 1; n <= 10; n++) if (d.p[n] === it.answers[n]) right++; }
-  else {
-    const qs = t.type === 'careful' ? it.questions : it.statements;
-    qs.forEach((q, k) => { if (d.a[k] === q.answer) right++; });
+  else if (t.type === 'matching') {
+    it.statements.forEach((q, k) => { if (d.a[k] === q.answer) right++; });
+  } else {
+    it.questions.forEach((q, k) => { if (d.a[k] === q.answer) right++; });
   }
+  // 折算分从"这场考试的试卷结构"算（分值 ÷ 题量）；
+  // 官方不给分项分值的（雅思、多邻国）就没有折算分，只报对错个数。
+  const per = scorePerQOf(t.type);
+  const tail = per
+    ? ` · 折算 <b>${(right * per).toFixed(1)}</b> 分`
+    : (t.type === 'quant' || t.type === 'single' ? '' : '');
   return `<div class="result">
-    <span class="score">答对 <b>${right}/${total}</b> · 折算 <b>${(right * t.scorePerQ).toFixed(1)}</b> 分</span>
+    <span class="score">答对 <b>${right}/${total}</b>${tail}</span>
     <button class="btn ghost sm" data-next="1">下一篇 →</button>
     <button class="btn ghost sm" data-reset="1">重做</button></div>`;
 }
@@ -1878,6 +1932,12 @@ document.addEventListener('click', e => {
 
   if (LS.get('ans:' + key, null)) return;   // 已提交，只读
 
+  // 听力理解的播放按钮（读这条题目的 script）
+  if (e.target.closest('[data-playq]')) {
+    const it2 = t.items[i];
+    if (it2.script) speak(it2.script); else toast('这条题目没有听力材料');
+    return;
+  }
   const pk = e.target.closest('[data-pick]');
   if (pk) {
     const [qi, oi] = pk.dataset.pick.split(':').map(Number);
@@ -1901,7 +1961,12 @@ document.addEventListener('click', e => {
   const sub = e.target.closest('[data-submit]');
   if (sub) {
     const d = ensureDraft(t, i);
-    if (t.type !== 'cloze' && Object.keys(d.a).length < (t.type === 'careful' ? t.items[i].questions.length : t.items[i].statements.length)) {
+    // ⚠️ 只在需要时取长度：cloze 的条目没有 questions / statements 字段，
+    //    放在前面无条件求值会抛 TypeError（曾经把提交按钮点坏过）
+    let nQ = 0;
+    if (t.type === 'matching') nQ = t.items[i].statements.length;
+    else if (t.type !== 'cloze') nQ = t.items[i].questions.length;
+    if (t.type !== 'cloze' && Object.keys(d.a).length < nQ) {
       if (!confirm('还有没答的题，确定提交？')) return;
     }
     submitRead(t, i, d); return;
@@ -1933,7 +1998,7 @@ function submitRead(t, i, d) {
   const push = (q, got, ans) => {
     wrong.push({ type: t.type, typeName: t.typeName, title: it.title, q, got: String(got), right: String(ans), t: today() });
   };
-  if (t.type === 'careful') {
+  if (t.type === 'careful' || CHOICE_TYPES.indexOf(t.type) >= 0) {
     total = it.questions.length;
     it.questions.forEach((q, k) => {
       const got = d.a[k];

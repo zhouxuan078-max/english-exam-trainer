@@ -208,7 +208,8 @@ table.pt .pr { display: block; color: var(--fg3); font-size: 11.5px; margin-top:
 /* 题目 */
 .q { padding: 14px 0; border-bottom: 1px solid var(--line); }
 .q:last-child { border-bottom: 0; padding-bottom: 0; }
-.qt { font-size: 15px; font-weight: 500; margin-bottom: 10px; }
+/* pre-line：GRE 数量比较那种"两行量"的题目靠 \n 换行，要能显示成两行 */
+.qt { font-size: 15px; font-weight: 500; margin-bottom: 10px; white-space: pre-line; }
 .opt {
   display: flex; gap: 10px; padding: 11px 13px; border-radius: 9px;
   border: 1px solid transparent; cursor: pointer; font-size: 14.5px;
