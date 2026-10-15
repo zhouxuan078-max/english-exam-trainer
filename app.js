@@ -51,7 +51,10 @@ function toast(msg) {
   let el = $('#toast');
   if (!el) { el = document.createElement('div'); el.id = 'toast'; el.className = 'pop'; document.body.appendChild(el); }
   el.textContent = msg; el.classList.remove('hide');
-  clearTimeout(el._t); el._t = setTimeout(() => el.classList.add('hide'), 2200);
+  clearTimeout(el._t);
+  // 长提示多留一会儿，否则看不清
+  el._t = setTimeout(() => el.classList.add('hide'),
+                     Math.min(9000, 2200 + msg.length * 60));
 }
 
 /* ---------- 词形还原 / 查词 ----------
@@ -118,10 +121,23 @@ function lookup(word) {
 }
 
 /* ---------- 点词查义 ---------- */
+/* 同一时刻只保留一个被标记的词，避免越点越花；
+   再点同一个词、点空白处、或点弹层里的按钮，都会**取消标记**。 */
+let markedEl = null;
+
+function clearMark() {
+  if (markedEl) { markedEl.classList.remove('hit', 'miss'); markedEl = null; }
+}
+
 document.addEventListener('click', e => {
   const el = e.target.closest('.w');
   const pop = $('#pop');
-  if (!el) { if (!e.target.closest('#pop')) pop.classList.add('hide'); return; }
+  if (!el) {
+    if (!e.target.closest('#pop')) { clearMark(); pop.classList.add('hide'); }
+    return;
+  }
+  if (el === markedEl) { clearMark(); pop.classList.add('hide'); return; }  // 再点一下 = 取消
+  clearMark();
   const raw = el.dataset.w;
   const hit = lookup(raw);
   if (hit) {
@@ -136,6 +152,7 @@ document.addEventListener('click', e => {
       <div class="add"><button data-add="${esc(raw.toLowerCase())}||">仍要收藏</button>
       <button class="sec" data-close="1">关闭</button></div>`;
   }
+  markedEl = el;
   pop.classList.remove('hide');
 });
 
@@ -144,11 +161,12 @@ document.addEventListener('click', e => {
   if (b) {
     const [w, p, m] = b.dataset.add.split('|');
     addVocab(w, p, m);
+    clearMark();
     $('#pop').classList.add('hide');
     toast('已加入生词本');
     return;
   }
-  if (e.target.closest('[data-close]')) $('#pop').classList.add('hide');
+  if (e.target.closest('[data-close]')) { clearMark(); $('#pop').classList.add('hide'); }
 });
 
 function addVocab(word, phon, mean) {
@@ -211,8 +229,7 @@ function vExamPick() {
   return `
   <div class="sec">我的考试场次</div>
   <div class="card tight">
-    <div class="meta">四级一年两场（6 月 / 12 月）。选你报名的那一场，倒计时会跟着变。
-      日期以<b>中国教育考试网</b>公告为准，别按"第几个周六"自己推。</div>
+    <div class="meta">四级一年两场（6 月 / 12 月）。选你报名的那一场，倒计时跟着变。</div>
     <div class="row" style="margin-bottom:6px">
       ${btn(isAuto, 'data-exam="auto"', '自动（最近一场）')}
       ${EXAM_SESSIONS.map(s => btn(!!(sel && sel.id === s.id), `data-exam="${s.id}"`, s.label)).join('')}
@@ -241,6 +258,7 @@ function wrap(text) {
 
 /* ---------- 路由 ---------- */
 let route = 'home', readType = 'careful';
+let helpOpen = false;      // 右上角「!」展开的说明面板
 
 function go(r) {
   route = r;
@@ -306,23 +324,6 @@ function vHome() {
       2. <b>听力听写 5 句</b>（6 分钟）— 练耳朵<br>
       3. <b>选词填空 1 篇</b>（8 分钟）— 最后做，别恋战<br>
       4. ${srsDueCount() ? `<b>复习生词 ${srsDueCount()} 个</b>（约 ${Math.max(2, Math.round(srsDueCount() * 0.25))} 分钟）— 在「生词本」里` : '做完把生词收藏，明天就会出现在复习队列里'}
-    </div>
-  </div>
-
-  <div class="card tight">
-    <div class="notice">
-      <b>点词怎么用</b>：正文里<b>可以点的词</b>就是本地四级词库收录的 4544 个词
-      —— 正好是该重点记的那些；没加下划线的是初中基础词，不用查。
-      点一下即可看释义并收藏，全程离线。
-    </div>
-  </div>
-
-  <div class="sec">关于题目来源</div>
-  <div class="card tight">
-    <div class="notice">
-      选词填空与听力语料取自 <b>Project Gutenberg</b>（公有领域），由程序自动生成；
-      仔细阅读与长篇匹配为<b>原创题目</b>——四级考的是说明文，而目前所有可访问的
-      开源文本要么体裁不符、要么过难。详见「我的 → 关于与版权」。
     </div>
   </div>`;
 }
@@ -613,14 +614,6 @@ function vVocab() {
     </div>
   </div>
   <div class="card tight">
-    <div class="notice">
-      <b>不用装 Anki 也能背</b>：点「开始复习」，按遗忘曲线的节奏自动排期
-      —— 记得的往后推（1 → 2 → 4 → 7 → 15 → 30 → 60 天），忘了的当天再来一遍。<br>
-      想丢进 Anki 或欧路词典背，用上面两个导出：<b>TSV</b> 给 Anki，
-      <b>CSV</b> 是通用格式（Excel / 欧路 / 不背单词等大多能导入）。
-    </div>
-  </div>
-  <div class="card tight">
     <div class="vlist">${vocab.map(v => `<div class="v"><b>${esc(v.word)}</b><span>${esc(v.mean || '待补释义')}</span></div>`).join('')}</div>
   </div>`;
 }
@@ -649,49 +642,64 @@ function exportCSV() {
      2. JSON 格式（本站"导出我的题目"产出的文件）—— 方便同学之间互传
    ---------------------------------------------------------- */
 
-const MYFORMAT_DEMO = `=== 仔细阅读 ===
+const MYFORMAT_DEMO = `（格式示例，照这个写就行。分节标题决定它归到哪一类，
+  只用这四种标题：仔细阅读 / 长篇匹配 / 选词填空 / 听力）
+
+=== 仔细阅读 ===
 TITLE: 我的练习 · 仔细阅读
 PASSAGE:
-第一段正文……
+Many students believe that the best way to prepare for an examination is to sit still at a desk for hours. Research suggests that this habit may work against them.
 
-第二段正文……
-Q: 这道题问什么？
-A. 选项一
-B. 选项二
-C. 选项三
-D. 选项四
+A short walk before study can improve attention and memory.
+Q: What do many students believe?
+A. That they should study in groups.
+B. That sitting still for hours is best.
+C. That morning study works better.
+D. That exercise should come first.
 ANSWER: B
-EXPLAIN: 解析写在这里（可省略）
-Q: 第二道题问什么？
-A. 选项一
-B. 选项二
-C. 选项三
-D. 选项四
+EXPLAIN: 解析写在这里，不写也行。
+Q: What may improve attention and memory?
+A. Studying in groups.
+B. Reading aloud for an hour.
+C. A short walk before study.
+D. Listening to music while reading.
 ANSWER: C
-EXPLAIN: 想写就写，不写也行
+EXPLAIN: 第二段第一句直接说了。
 
 === 选词填空 ===
 TITLE: 我的练习 · 选词填空
 PASSAGE:
-正文里用 {{1}} {{2}} 标出空格位置。
-OPTIONS: word1 word2 word3
-ANSWERS: 1:word1 2:word2
+In many cities, people {{1}} to work by bicycle, and the {{2}} has grown quickly in recent years.
+OPTIONS: choose number benefit
+ANSWERS: 1:choose 2:number
 
 === 长篇匹配 ===
 TITLE: 我的练习 · 长篇匹配
 PARAGRAPHS:
-A. 段落 A 的内容
-B. 段落 B 的内容
+A. Many adults begin a new language believing that the best years have passed.
+B. When adults and children get the same instruction, adults often progress faster at first.
+C. The biggest difficulty for most adult learners is not ability but time.
 STATEMENTS:
-- 一句陈述 | A
-- 另一句陈述 | B`;
+- Adults think they have missed the best period for learning. | A
+- Finding regular time to study is the biggest obstacle. | C
+
+=== 听力 ===
+TITLE: 我的练习 · 听力听写
+- Many adults begin a new language believing that the best years have passed.
+- The biggest difficulty for most adult learners is not ability but time.`;
 
 function myBankTypes() {
   const my = LS.get('mybank', null);
   return (my && Array.isArray(my.types)) ? my.types : [];
 }
+/* 阅读类条数（不含听力，听力按"句"算） */
 function myBankCount() {
-  return myBankTypes().reduce((a, t) => a + t.items.length, 0);
+  return myBankTypes().filter(t => t.type !== 'listen')
+    .reduce((a, t) => a + t.items.length, 0);
+}
+function myListenCount() {
+  const t = myBankTypes().find(x => x.type === 'listen');
+  return t ? t.items.length : 0;
 }
 
 /* --- 文本格式解析 --- */
@@ -789,29 +797,65 @@ function _parseMatching(lines) {
   return { title: title || '我的长篇匹配', paragraphs: ps, statements: sts };
 }
 
+/* 听力：一行一句。可带 "- " 或 "TEXT:" 前缀，也可以直接写句子。
+   要求含连续英文字母（≥3 个），否则把中文说明行也当句子了（踩过）。 */
+function _parseListen(lines) {
+  const out = [];
+  for (const raw of lines) {
+    let t = raw.trim();
+    if (!t) continue;
+    if (/^TITLE\s*[:：]/i.test(t)) continue;
+    t = t.replace(/^(TEXT|SENTENCE|SENT)\s*[:：]\s*/i, '');
+    t = t.replace(/^[-*•]\s+/, '').replace(/^\d+\s*[.)、]\s+/, '');
+    t = t.trim();
+    if (t.length < 6) continue;
+    if (!/[A-Za-z]{3}/.test(t)) continue;   // 不是英文句子，跳过
+    out.push(t);
+  }
+  return out.length ? out : null;
+}
+
 function parseMyBankText(text) {
-  const out = { careful: [], matching: [], cloze: [] };
+  const out = { careful: [], matching: [], cloze: [], listen: [] };
+  const unknown = [];
   let seq = 0;
   for (const b of _splitSections(text)) {
     const nm = b.name;
     let item = null, type = null;
     if (/选词|cloze/i.test(nm)) { item = _parseCloze(b.lines); type = 'cloze'; }
     else if (/匹配|matching/i.test(nm)) { item = _parseMatching(b.lines); type = 'matching'; }
+    else if (/听|listen/i.test(nm)) { item = _parseListen(b.lines); type = 'listen'; }
     else if (/阅读|careful|reading/i.test(nm)) { item = _parseCareful(b.lines); type = 'careful'; }
-    if (!item) continue;
+    if (!item) { unknown.push(nm); continue; }
+    if (type === 'listen') {
+      for (const t of item) {
+        seq++;
+        out.listen.push({ id: 'mine-listen-' + seq, text: t, origin: 'mine' });
+      }
+      continue;
+    }
     seq++;
     item.id = 'mine-' + type + '-' + seq;
     item.origin = 'mine';
     out[type].push(item);
   }
-  return out;
+  return { out, unknown };
 }
 
 const MY_TYPE_META = {
-  careful: { name: '仔细阅读', score: 14.2 },
-  matching: { name: '长篇匹配', score: 7.1 },
-  cloze: { name: '选词填空', score: 3.55 },
+  careful: { name: '仔细阅读', score: 14.2, unit: '篇' },
+  matching: { name: '长篇匹配', score: 7.1, unit: '篇' },
+  cloze: { name: '选词填空', score: 3.55, unit: '篇' },
+  listen: { name: '听力听写', score: 0, unit: '句' },
 };
+
+/* 分节标题怎么写都能认出来（给使用者一个明确的对照表） */
+const MY_SECTION_HINTS = [
+  { match: '选词 / cloze', to: '选词填空' },
+  { match: '匹配 / matching', to: '长篇匹配' },
+  { match: '听 / listen', to: '听力听写' },
+  { match: '阅读 / careful / reading', to: '仔细阅读' },
+];
 
 function parseMyBankInput(text) {
   const s = String(text || '').trim();
@@ -828,32 +872,41 @@ function parseMyBankInput(text) {
       items: (t.items || []).map(i => Object.assign({}, i, { origin: 'mine' })),
     })).filter(t => t.items.length);
     if (!types.length) return { ok: false, msg: 'JSON 里没有任何题目' };
-    return { ok: true, types };
+    return { ok: true, types, unknown: [] };
   }
   // 文本格式
   const parsed = parseMyBankText(s);
   const types = [];
-  for (const k of ['careful', 'matching', 'cloze']) {
-    if (!parsed[k].length) continue;
+  for (const k of ['careful', 'matching', 'cloze', 'listen']) {
+    if (!parsed.out[k].length) continue;
     types.push({
       type: k, typeName: (MY_TYPE_META[k] || {}).name || k,
-      note: '我自己导入的题目，只保存在这台设备的浏览器里。',
+      note: k === 'listen'
+        ? '我自己导入的听力句子，只保存在这台设备的浏览器里。'
+        : '我自己导入的题目，只保存在这台设备的浏览器里。',
       scorePerQ: (MY_TYPE_META[k] || {}).score || 0,
-      items: parsed[k],
+      items: parsed.out[k],
     });
   }
   if (!types.length) {
-    return { ok: false, msg: '没解析出题目。检查一下是不是缺少 === 仔细阅读 === 这样的分节标题' };
+    return {
+      ok: false,
+      msg: '没解析出内容。检查一下是不是缺少 === 仔细阅读 === 这样的分节标题',
+      unknown: parsed.unknown,
+    };
   }
-  return { ok: true, types };
+  return { ok: true, types, unknown: parsed.unknown };
 }
 
 /* 把「我的题目」合并进当前题库（重建，避免重复叠加） */
 function rebuildBank() {
   if (!S.base) return;
   const clone = JSON.parse(JSON.stringify(S.base));
+  const myListen = [];
   const prepend = (types) => {
     for (const t of (types || [])) {
+      // 听力是独立的一份数据（S.listen），不在 bank.types 里
+      if (t.type === 'listen') { myListen.push.apply(myListen, t.items || []); continue; }
       const bt = clone.types.find(x => x.type === t.type);
       if (bt) bt.items = t.items.concat(bt.items);
       else clone.types.push(t);
@@ -864,16 +917,24 @@ function rebuildBank() {
   S.bank = clone;
   S.bank.hasLocal = S.localCount || 0;
   S.bank.hasMine = myBankCount();
+  S.myListenCount = myListen.length;
+  if (S.baseListen) {
+    S.listen = { note: S.baseListen.note, items: myListen.concat(S.baseListen.items || []) };
+  }
 }
 
 function importMyBank(text) {
   const r = parseMyBankInput(text);
   if (!r.ok) return r;
-  const n = r.types.reduce((a, t) => a + t.items.length, 0);
+  const parts = r.types.map(t => {
+    const m = MY_TYPE_META[t.type] || {};
+    return (m.name || t.type) + ' ' + t.items.length + (m.unit || '篇');
+  });
+  const total = r.types.reduce((a, t) => a + t.items.length, 0);
   LS.set('mybank', { version: today(), types: r.types });
   rebuildBank();
   render();
-  return { ok: true, n, types: r.types.map(t => t.typeName + ' ' + t.items.length + ' 篇').join('、') };
+  return { ok: true, n: total, types: parts.join('、'), unknown: r.unknown || [] };
 }
 
 /* ---------- 我的 ---------- */
@@ -912,20 +973,28 @@ function vMe() {
   <div class="sec">我的题目（只有我自己看得见）</div>
   <div class="card tight">
     <div class="meta">
-      这个站<b>不带任何版权资料</b>。你自己买的、老师发的、自己整理的题目，
-      可以在这里导进来 —— 只存在<b>你这台设备的浏览器</b>里，
-      不上传、别人也看不到。${myBankCount() ? ` 已导入 <b>${myBankCount()}</b> 篇，会排在每个题型最前面。` : ''}
+      这个站<b>不带任何版权资料</b>；你自己的资料导进来，只存在这台设备的浏览器里。
+      ${(myBankCount() || myListenCount())
+        ? ` 已导入 <b>${myBankCount()}</b> 篇${myListenCount() ? ' · <b>' + myListenCount() + '</b> 句听力' : ''}，排在每类最前面。`
+        : ''}
     </div>
     <div class="row">
       <button class="btn ghost sm" data-mytoggle="1">导入我的题目</button>
-      ${myBankCount() ? `<button class="btn ghost sm" data-myexport="1">导出（可以传给别人）</button>
+      ${(myBankCount() || myListenCount()) ? `<button class="btn ghost sm" data-myexport="1">导出（可以传给别人）</button>
       <button class="btn ghost sm" data-myclear="1">清空</button>` : ''}
     </div>
     <div id="mypanel" style="display:none">
+      <div class="meta" style="margin:8px 0 4px">
+        分节标题决定它归到哪一类，照着写就行：
+      </div>
+      <div class="meta" style="font-size:12px;line-height:2;margin-bottom:6px">
+        <code>=== 仔细阅读 ===</code> <code>=== 长篇匹配 ===</code><br>
+        <code>=== 选词填空 ===</code> <code>=== 听力 ===</code>
+      </div>
       <div style="margin:8px 0">
         <input type="file" id="myfile" accept=".txt,.json" style="font-size:12px">
       </div>
-      <textarea id="mytext" rows="7" placeholder="也可以直接把题目文本粘贴在这里"
+      <textarea id="mytext" rows="7" placeholder="也可以直接把内容粘贴在这里"
         style="width:100%;box-sizing:border-box;font-family:ui-monospace,Consolas,monospace;font-size:12px;padding:8px;border:1px solid var(--line);border-radius:8px"></textarea>
       <div class="row">
         <button class="btn" data-myimport="1">导入</button>
@@ -933,8 +1002,7 @@ function vMe() {
       </div>
       <pre id="myfmt" style="display:none;font-size:11px;line-height:1.55;background:var(--bg);padding:10px;border-radius:8px;overflow:auto;margin:0">${esc(MYFORMAT_DEMO)}</pre>
       <div class="meta" style="margin-top:8px">
-        ⚠ 请只导入<b>你自己有权使用</b>的材料。这个站只是工具，
-        不带内容，也不替使用者承担内容责任。
+        ⚠ 只导入<b>你自己有权使用</b>的材料。这个站只是工具，不带内容。
       </div>
     </div>
   </div>
@@ -997,20 +1065,83 @@ function vMe() {
 }
 
 /* ---------- 渲染 ---------- */
+/* ---------- 每页的说明（藏在右上角「!」后面，点一下才展开） ---------- */
+const HELP = {
+  home: {
+    t: '首页怎么看',
+    items: [
+      '<b>倒计时</b>按你在「我的 → 我的考试场次」里选的那一场算，不是写死的。',
+      '<b>今天做什么</b>是建议量，做完就行，不用自己加码。',
+      '<b>连续打卡</b>指有答题动作的天数，断一天就从头算。',
+      '<b>点词怎么用</b>：正文里<b>颜色可点的词</b>就是词库收录的，点一下出释义，能一键收进生词本；再点一下或点空白处取消标记。',
+      '题目来源：选词填空与听力取自 <b>Project Gutenberg</b>（公有领域）自动生成；仔细阅读与长篇匹配是原创题；不含真题。',
+    ],
+  },
+  read: {
+    t: '阅读怎么用',
+    items: [
+      '三种题型，分值按真题：<b>仔细阅读 14.2 分/题</b>（最高，优先练）· 长篇匹配 7.1 分/题 · 选词填空 3.55 分/题。',
+      '选好答案点 <b>提交</b> 才判分，判完每题都有中文解析。',
+      '答错的自动进 <b>错题本</b>（在「我的」里看）。',
+      '正文里点<b>颜色可点的词</b>能立刻查释义并收藏；点同一个词或点空白处可以<b>取消标记</b>。',
+      '如果导入过自己的题目，会带 <b>「我的题目」</b> 标签排在最前面。',
+    ],
+  },
+  listen: {
+    t: '听力怎么用',
+    items: [
+      '点 ▶ 播放（用浏览器自带朗读，不用联网下音频）。',
+      '听不清就<b>多点几次</b>，也能切成 0.7× / 0.85× 慢速。',
+      '把听到的句子打出来，点 <b>提交</b> 自动比对。',
+      '判分<b>忽略大小写和标点</b>，只比单词，不用纠结标点。',
+      '实在听不出来点 <b>跳过</b>，后面还会再遇到。',
+    ],
+  },
+  vocab: {
+    t: '生词本怎么用',
+    items: [
+      '<b>不用装 Anki 也能背</b>：点「开始复习」，按遗忘曲线排期（1 → 2 → 4 → 7 → 15 → 30 → 60 天），记得的往后推、忘了的当天再来一遍。',
+      '<b>导出 CSV（通用）</b>：Excel / 欧路词典 / 不背单词 / 墨墨 等大多能导入，带 BOM 不乱码。',
+      '<b>导出 Anki（TSV）</b>：给装了 Anki 的人，字段顺序是 单词 / 音标 / 释义 / 来源。',
+      '生词只存在<b>你自己浏览器</b>里，别人看不到你的。',
+    ],
+  },
+  me: {
+    t: '这一页在说什么',
+    items: [
+      '<b>我的考试场次</b>：四级一年两场（6 月 / 12 月），选你报名的那一场，首页倒计时跟着变；官方临时改期就用「自定义日期」。',
+      '<b>我的题目</b>：这个站<b>不带任何版权资料</b>。你自己买的、老师发的资料，导进来只存在你这台设备的浏览器里，不上传、别人看不到。',
+      '<b>关于与版权</b>：开源语料取自 Project Gutenberg（公有领域），原创题由作者撰写，<b>不含四级真题</b>。',
+      '所有数据（错题 / 生词 / 打卡）都在<b>你自己浏览器本地</b>，清浏览器数据会丢。',
+    ],
+  },
+};
+
+function vHelp() {
+  const h = HELP[route] || HELP.home;
+  return `<div class="card tight helpcard">
+    <div class="h">${esc(h.t)}</div>
+    <ul>${h.items.map(x => '<li>' + x + '</li>').join('')}</ul>
+  </div>`;
+}
+
 function render() {
   header();
   if (route !== 'vocab') vMode = 'list';   // 离开生词页就退出复习态
-  const v = $('#view');
-  if (route === 'read') v.innerHTML = vRead();
-  else if (route === 'listen') v.innerHTML = vListen();
-  else if (route === 'vocab') v.innerHTML = vVocab();
-  else if (route === 'me') v.innerHTML = vMe();
-  else v.innerHTML = vHome();
+  const hb = $('#hdHelp');
+  if (hb) hb.classList.toggle('on', helpOpen);
+  const body = route === 'read' ? vRead()
+    : route === 'listen' ? vListen()
+    : route === 'vocab' ? vVocab()
+    : route === 'me' ? vMe()
+    : vHome();
+  $('#view').innerHTML = (helpOpen ? vHelp() : '') + body;
   if (route === 'listen') bindListen();
 }
 
 /* ---------- 事件 ---------- */
 document.addEventListener('click', e => {
+  if (e.target.closest('#hdHelp')) { helpOpen = !helpOpen; render(); return; }
   const g = e.target.closest('[data-go]'); if (g) { go(g.dataset.go); return; }
   const rt = e.target.closest('[data-rt]');
   if (rt) { readType = rt.dataset.rt; draft = null; render(); return; }
@@ -1167,7 +1298,17 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-myimport]')) {
     const ta = $('#mytext');
     const r = importMyBank(ta ? ta.value : '');
-    toast(r.ok ? ('导入成功：' + r.types) : ('导入失败：' + r.msg));
+    let msg;
+    if (r.ok) {
+      msg = '识别成功 → ' + r.types;
+    } else {
+      msg = '导入失败：' + r.msg;
+    }
+    if (r.unknown && r.unknown.length) {
+      msg += '；有分节没认出来：「' + r.unknown.join('」「') +
+             '」——分节标题请写成 仔细阅读 / 长篇匹配 / 选词填空 / 听力 之一';
+    }
+    toast(msg);
     return;
   }
   if (e.target.closest('[data-myexport]')) {
@@ -1256,7 +1397,7 @@ async function boot() {
         fetch('data/listening.json').then(r => r.json()).catch(() => null)
       ]);
     }
-    S.base = bank; S.listen = listen;
+    S.base = bank; S.baseListen = listen; S.listen = listen;
 
     if (!IN) {
       // 自备题库（site/data/bank.local.json）：只有本地版才有这个文件

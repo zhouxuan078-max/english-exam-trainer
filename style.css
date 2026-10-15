@@ -56,6 +56,23 @@ header .wrap { padding-bottom: 0; display: flex; align-items: center; justify-co
 h1 { font-size: 17px; font-weight: 600; }
 .sub { font-size: 12px; color: var(--fg2); }
 
+/* 右上角的「!」帮助按钮（点一下展开这一页的说明） */
+.hdright { display: flex; align-items: center; gap: 10px; text-align: right; }
+.hintbtn {
+  flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--card); color: var(--fg2);
+  font: 500 13px/1 var(--font); cursor: pointer; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.hintbtn.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+
+/* 帮助卡片 */
+.helpcard { border-left: 3px solid var(--brand); }
+.helpcard .h { font-size: 14px; font-weight: 500; margin: 0 0 6px; }
+.helpcard ul { margin: 0; padding-left: 18px; }
+.helpcard li { font-size: 13px; color: var(--fg2); line-height: 1.75; margin: 4px 0; }
+.helpcard li b { color: var(--fg); }
+
 /* 底部导航 */
 nav {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
