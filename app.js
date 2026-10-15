@@ -526,7 +526,15 @@ const LS = {
 };
 
 /* 某个题型已经做了多少条（提交过的条目才会留下 ans:<题型>:<序号>） */
-function doneCountOf(typeId) { return LS.keys('ans:' + typeId + ':').length; }
+/* 答题记录的键 = 考试 + 题型 + 第几题。
+   ⚠️ **必须带上考试**：题库是所有考试共用的一份，键里不带考试的话，
+      在四级做过一篇、切到六级，六级的"累计"也会跟着涨。
+      用户要求"每种考试的累计要独立"，所以这里把考试 id 编进键里。 */
+function ansKey(typeId, i) { return 'ans:' + curExam().id + ':' + typeId + ':' + i; }
+function draftKey(typeId, i) { return 'draft:' + curExam().id + ':' + typeId + ':' + i; }
+function doneCountOf(typeId) {
+  return LS.keys('ans:' + curExam().id + ':' + typeId + ':').length;
+}
 let wrong = LS.get('wrong', []);
 let vocab = LS.get('vocab', []);
 let days = LS.get('days', []);
@@ -691,7 +699,7 @@ document.addEventListener('click', e => {
     const ctx0 = curReadItem();
     if (!ctx0) return;
     const txt0 = ((ensureDraft(ctx0.t, ctx0.i).x) || {}).text
-      || (((LS.get('ans:' + ctx0.key, null) || {}).x) || {}).text || '';
+      || (((LS.get(ansKey(ctx0.t.type, ctx0.i), null) || {}).x) || {}).text || '';
     if (!txt0.trim()) { toast('还没写东西'); return; }
     copyText(aiPromptFor(ctx0.t, ctx0.it, txt0)).then(okc =>
       toast(okc ? '已复制：题目 + 要求 + 你的作答，粘给 AI 就行'
@@ -1064,7 +1072,7 @@ function vHome() {
     })()}
   </div>
 
-  <div class="sec">各题型做了多少（累计）</div>
+  <div class="sec">各题型做了多少</div>
   <div class="card tight">
     <div class="vlist">
       ${examInfo().types.map(t => {
@@ -1125,7 +1133,7 @@ function srcLine(it) {
 
 function vItem(t, i) {
   const it = t.items[i];
-  const submitted = LS.get('ans:' + t.type + ':' + i, null);
+  const submitted = LS.get(ansKey(t.type, i), null);
   const done = !!submitted;
   // 关键：未提交时要用"作答草稿"渲染，否则点了选项界面不会显示选中
   const d = done
@@ -1402,7 +1410,7 @@ let draft = null;   // 当前作答草稿
 function ensureDraft(t, i) {
   const key = t.type + ':' + i;
   if (!draft || draft.key !== key) {
-    const saved = LS.get('draft:' + key, null);
+    const saved = LS.get(draftKey(t.type, i), null);
     draft = { key, a: (saved && saved.a) || {}, p: (saved && saved.p) || {},
               x: (saved && saved.x) || {}, chip: null };
   }
@@ -2050,7 +2058,7 @@ document.addEventListener('click', e => {
     return;
   }
 
-  if (LS.get('ans:' + key, null)) return;   // 已提交，只读
+  if (LS.get(ansKey(readType, i), null)) return;   // 已提交，只读
 
   // 口语：把参考回答读出来
   if (e.target.closest('[data-playsample]')) {
@@ -2075,13 +2083,13 @@ document.addEventListener('click', e => {
   if (pk) {
     const [qi, oi] = pk.dataset.pick.split(':').map(Number);
     const d = ensureDraft(t, i); d.a[qi] = oi;
-    LS.set('draft:' + key, d); render(); return;
+    LS.set(draftKey(t.type, i), d); render(); return;
   }
   const ch = e.target.closest('[data-chip]');
   if (ch) {
     const d = ensureDraft(t, i);
     d.chip = (d.chip === ch.dataset.chip) ? null : ch.dataset.chip;
-    LS.set('draft:' + key, d); render(); return;
+    LS.set(draftKey(t.type, i), d); render(); return;
   }
   const bl = e.target.closest('[data-blank]');
   if (bl) {
@@ -2089,7 +2097,7 @@ document.addEventListener('click', e => {
     const n = bl.dataset.blank;
     if (d.p[n]) { delete d.p[n]; }
     else if (d.chip) { d.p[n] = d.chip; d.chip = null; }
-    LS.set('draft:' + key, d); render(); return;
+    LS.set(draftKey(t.type, i), d); render(); return;
   }
   const sub = e.target.closest('[data-submit]');
   if (sub) {
@@ -2116,7 +2124,10 @@ document.addEventListener('click', e => {
     draft = null; render(); return;
   }
   const rs = e.target.closest('[data-reset]');
-  if (rs) { LS.set('ans:' + key, null); LS.set('draft:' + key, null); draft = null; render(); return; }
+  if (rs) {
+    LS.set(ansKey(readType, i), null); LS.set(draftKey(readType, i), null);
+    draft = null; render(); return;
+  }
 });
 
 /* 打字：填空题的每个空、开放式的文本框。
@@ -2127,14 +2138,14 @@ document.addEventListener('input', e => {
   const t = S.bank && S.bank.types.find(x => x.type === readType);
   if (!t) return;
   const i = Math.min(stateOf(readType), t.items.length - 1);
-  if (LS.get('ans:' + readType + ':' + i, null)) return;
+  if (LS.get(ansKey(readType, i), null)) return;
   const d = ensureDraft(t, i);
 
   const gi = e.target.closest('[data-gap]');
   if (gi) {
     const n = gi.dataset.gap;
     if (gi.value) d.p[n] = gi.value; else delete d.p[n];
-    LS.set('draft:' + readType + ':' + i, d);
+    LS.set(draftKey(readType, i), d);
     const btn = document.querySelector('[data-submit]');
     const need = Object.keys(t.items[i].answers || {}).length;
     if (btn) btn.textContent = '提交（已答 ' + Object.keys(d.p).length + '/' + need + '）';
@@ -2142,7 +2153,7 @@ document.addEventListener('input', e => {
   }
   if (e.target.id === 'openin') {
     d.x = { text: e.target.value };
-    LS.set('draft:' + readType + ':' + i, d);
+    LS.set(draftKey(readType, i), d);
     const w = document.getElementById('wc');
     if (w) w.textContent = t.type === 'translate'
       ? cc(e.target.value) + ' 字' : wc(e.target.value) + ' 词';
@@ -2154,18 +2165,18 @@ document.addEventListener('change', e => {
   if (!sel || route.indexOf('type:') !== 0) return;
   const t = S.bank.types.find(x => x.type === readType);
   const i = Math.min(stateOf(readType), t.items.length - 1);
-  if (LS.get('ans:' + readType + ':' + i, null)) return;
+  if (LS.get(ansKey(readType, i), null)) return;
   const d = ensureDraft(t, i);
   const si = +sel.dataset.sel;
   if (sel.value) d.a[si] = sel.value; else delete d.a[si];
-  LS.set('draft:' + readType + ':' + i, d);
+  LS.set(draftKey(readType, i), d);
 });
 
 function submitRead(t, i, d) {
   const it = t.items[i];
   const key = readType + ':' + i;
   const st = { a: d.a, p: d.p };
-  LS.set('ans:' + key, st);
+  LS.set(ansKey(t.type, i), st);
   let right = 0, total = 0;
   const push = (q, got, ans) => {
     wrong.push({ type: t.type, typeName: t.typeName, title: it.title, q, got: String(got), right: String(ans), t: today() });
@@ -2325,7 +2336,7 @@ function copyText(txt) {
 /* 开放式作答（写 / 译 / 说）：不判分、不进正确率，只记打卡。
    参考范文放在题目的 sample / reference 里，提交后自己对照。 */
 function submitOpen(t, i, d) {
-  LS.set('ans:' + readType + ':' + i, { x: d.x || {} });
+  LS.set(ansKey(t.type, i), { x: d.x || {} });
   markDay();
   render();
 }
