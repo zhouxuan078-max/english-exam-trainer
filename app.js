@@ -28,9 +28,9 @@ const QTYPES = {
 /* 考试清单。group 决定在界面上怎么分组；数组顺序就是推进顺序。
    builtin:true = 站里已经内置了这个考试的题库。 */
 const EXAMS = [
-  /* ——— 第一阶段：四级已经做好（有内置题库） ——— */
+  /* ——— 第一阶段：四级（UI 先做好，题库由使用者自己导入） ——— */
   { id: 'cet4', group: '大学', name: '大学英语四级（CET-4）', short: '大学英语四级',
-    date: '2026-12-12', builtin: true,
+    date: '2026-12-12', builtin: false,
     types: ['careful', 'matching', 'cloze', 'listen'],
     struct: '写作 15% · 听力 35% · 阅读 35% · 翻译 15%',
     note: '上午 9:00-11:20，总分 710，425 分为六级报考门槛' },
@@ -430,7 +430,7 @@ function wrap(text) {
 let marks = LS.get('marks', {});    // { 'careful:xxx': { w:['word'], o:['0:2'] } }
 
 function curReadItem() {
-  if (route !== 'read') return null;
+  if (route.indexOf('type:') !== 0) return null;
   const t = S.bank && S.bank.types.find(x => x.type === readType);
   if (!t) return null;
   const i = prog[readType] || 0;
@@ -494,34 +494,50 @@ function go(r) {
   render();
 }
 
-/* 底部导航：按当前考试的题型动态生成。
-   比如选了没有「听力听写」的考试，就不显示"听力"这一项 ——
-   界面只出现这个考试真正需要的题型。 */
-const NAV_ALL = [
-  { k: 'home',   ic: '🏠', n: '首页' },
-  { k: 'read',   ic: '📖', n: '阅读', need: 'read' },
-  { k: 'listen', ic: '🎧', n: '听力', need: 'listen' },
-  { k: 'vocab',  ic: '🔖', n: '生词' },
-  { k: 'me',     ic: '📊', n: '我的' },
-];
+/* 底部导航 = 首页 + 这个考试的【全部】题型 + 生词 + 我的。
+   注意：**包括还没实现的题型** —— 让人一眼看到这个考试完整长什么样，
+   点进去会说明它是什么、为什么还没做。题型多时导航横向滚动。 */
+const NAV_TYPE_ICON = {
+  careful: '📄', matching: '🧩', cloze: '✏️', listen: '🎧',
+  single: '🔤', judge: '⚖️', gap: '⬜', audio: '🎵', write: '✍️', speak: '🗣️',
+};
+
+/* 每个题型一句话说清它是什么（"还没做"的页面靠它解释） */
+const TYPE_DESC = {
+  careful: '仔细阅读：一篇短文 + 若干道选择题。',
+  matching: '长篇匹配：几段文字，把句子配到对应段落。',
+  cloze: '选词填空：短文挖空，从备选词里挑。',
+  listen:  '听力听写：机器朗读一句，你把它打出来。',
+  single:  '单选题：给一段材料（或一段音频），从 A/B/C/D 里选一个。雅思听力/阅读、托福、高考、中考的主力题型。',
+  judge:   '判断题：给一句话，判断它和原文「一致 / 相反 / 没提到」（雅思的 T/F/NG、Y/N/NG）。',
+  gap:     '填空题：空格里的词自己写，不从选项里挑。雅思阅读/听力、高考语法填空都用。',
+  audio:   '音频听力：播放真实录音（对话、讲座）再答题。和现在的「听力听写」不同 —— 那个是机器朗读。',
+  write:   '写作：给题目，写一篇，需要批改评分。自动判分很难，要另想办法。',
+  speak:   '口语：要录音和评分，网页里做不完整，放最后。',
+};
 
 function navItems() {
-  return NAV_ALL.filter(x => {
-    if (x.need === 'read') return examReadTypes().length > 0;
-    if (x.need === 'listen') return examHasListen();
-    return true;
+  const items = [{ k: 'home', ic: '🏠', n: '首页' }];
+  examInfo().types.forEach(t => {
+    items.push({ k: 'type:' + t, ic: NAV_TYPE_ICON[t] || '📘',
+                 n: (QTYPES[t] || {}).name || t });
   });
+  items.push({ k: 'vocab', ic: '🔖', n: '生词' });
+  items.push({ k: 'me', ic: '📊', n: '我的' });
+  return items;
 }
 
 function renderNav() {
   const nav = document.querySelector('nav');
   if (!nav) return;
-  if (onboarding) { nav.innerHTML = ''; return; }
+  if (onboarding) { nav.innerHTML = ''; nav.classList.remove('wide'); return; }
   const items = navItems();
-  if (!items.some(x => x.k === route)) route = 'home';   // 当前页被裁掉了就回首页
+  if (!items.some(x => x.k === route)) route = 'home';   // 当前页没了就回首页
   nav.innerHTML = items.map(x =>
     `<button data-nav="${x.k}" class="${route === x.k ? 'on' : ''}">` +
     `<span class="ic">${x.ic}</span>${x.n}</button>`).join('');
+  // 题型多的时候（雅思 9 项）横向滚动，不挤压
+  nav.classList.toggle('wide', items.length > 5);
 }
 
 /* 导航是动态重建的，所以用事件委托绑点击 */
@@ -537,17 +553,22 @@ window.addEventListener('hashchange', () => {
 
 /* ---------- 顶栏 ---------- */
 function header() {
-  const rt = examReadTypes().map(t => (QTYPES[t] || {}).name).filter(Boolean);
-  const map = {
-    home: [examShort(), '把今天的量做完就行'],
-    read: ['阅读', rt.length ? rt.join(' · ') : '先导入题目'],
-    listen: ['听力听写', '浏览器朗读，跟读默写'],
-    vocab: ['生词本', '点短文里的词就能收藏'],
-    me: ['我的', '数据都在你自己手机上'],
-  };
-  const m = map[route] || map.home;
-  $('#hdTitle').textContent = m[0];
-  $('#hdSub').textContent = m[1];
+  let title = examShort(), sub = '把今天的量做完就行';
+  if (route === 'vocab') { title = '生词本'; sub = '点短文里的词就能收藏'; }
+  else if (route === 'me') { title = '我的'; sub = '数据都在你自己手机上'; }
+  else if (route.indexOf('type:') === 0) {
+    const id = route.slice(5);
+    const q = QTYPES[id] || {};
+    title = q.name || id;
+    const t = S.bank && S.bank.types.find(x => x.type === id);
+    if (!q.impl) sub = '这个题型还没做';
+    else if (id === 'listen') sub = '浏览器朗读，跟读默写';
+    else sub = (t && t.items.length)
+      ? (t.items.length + ' 道 · 每题 ' + (t.scorePerQ || 0) + ' 分')
+      : '还没有题目';
+  }
+  $('#hdTitle').textContent = title;
+  $('#hdSub').textContent = sub;
   const dn = daysToExam();
   $('#hdCount').textContent = dn === null ? '未设考试日期'
     : (examPassed() ? '考试已结束' : `距${examShort()} ${dn} 天`);
@@ -624,36 +645,42 @@ function vHome() {
 function stateOf(type) { return prog[type] || 0; }
 function setState(type, i) { prog[type] = i; LS.set('prog', prog); }
 
-function vRead() {
-  if (!S.bank.types.length) return `<div class="card"><div class="empty">题库是空的</div></div>`;
+/* ---------- 题型页 ----------
+   路由是 type:<题型id>。已实现的渲染题目；没实现的给一个说明页。 */
+function vTypePage(id) {
+  const q = QTYPES[id] || {};
+  if (!q.impl) return vComingSoon(id);
+  if (id === 'listen') return vListen();
+  const t = S.bank && S.bank.types.find(x => x.type === id);
+  if (!t || !t.items.length) return vTypeEmpty(id);
+  const i = Math.min(stateOf(id), t.items.length - 1);
+  return vItem(t, i);
+}
 
-  // 只显示"当前考试需要、且题库里确实有"的题型。
-  // 完全不匹配时（比如选了雅思但题库是四级的）就全显示，并说明一句。
-  const need = examReadTypes();
-  let types = S.bank.types.filter(t => need.indexOf(t.type) >= 0);
-  const mismatch = !types.length;
-  if (mismatch) types = S.bank.types;
+function vTypeEmpty(id) {
+  const q = QTYPES[id] || {};
+  return `<div class="card">
+    <div class="ttl">${esc(q.name || id)}</div>
+    <div class="meta" style="margin-top:6px">${esc(TYPE_DESC[id] || '')}</div>
+    <div class="empty">这个题型还没有题目。</div>
+    <div class="row"><button class="btn" data-go="me">去「我的题目」导入</button></div>
+  </div>`;
+}
 
-  if (!readType || (readType !== 'wrong' && !types.some(t => t.type === readType))) {
-    readType = types[0].type;
-  }
-  const tabs = types.map(t =>
-    `<button class="tab${t.type === readType ? ' on' : ''}" data-rt="${t.type}">${esc(t.typeName)}<span class="n">${t.items.length}</span></button>`
-  ).join('') + `<button class="tab${readType === 'wrong' ? ' on' : ''}" data-rt="wrong">错题本<span class="n">${wrong.length}</span></button>`;
-
-  let body;
-  if (readType === 'wrong') body = vWrong();
-  else {
-    const t = S.bank.types.find(x => x.type === readType);
-    const i = Math.min(stateOf(readType), t.items.length - 1);
-    body = vItem(t, i);
-  }
-  const notice = mismatch
-    ? `<div class="card tight"><div class="meta">这些题不属于 <b>${esc(examShort())}</b>，
-        先用它们练手可以，但界面要变成这个考试的题型，得先把对应题型做出来
-        （去「我的 → 我的考试」能看到还缺哪些）。</div></div>`
-    : '';
-  return `<div class="tabs">${tabs}</div>${notice}${body}`;
+function vComingSoon(id) {
+  const q = QTYPES[id] || {};
+  const cur = examInfo();
+  return `<div class="card">
+    <div class="ttl">${esc(q.name || id)}
+      <span class="tag" style="margin-left:6px;background:var(--warn-soft);color:var(--warn);border-color:transparent">还没做</span>
+    </div>
+    <div class="meta" style="margin-top:8px">${esc(TYPE_DESC[id] || '')}</div>
+  </div>
+  <div class="card tight">
+    <div class="meta">这个题型还在开发中，所以选 <b>${esc(cur.name)}</b> 时，
+      它暂时只能出现在导航里、点不进去刷题。
+      去「我的 → 我的考试」能看到这个考试还缺哪几种题型。</div>
+  </div>`;
 }
 
 function originTag(it) {
@@ -1377,25 +1404,16 @@ const HELP = {
       '题目来源：选词填空与听力取自 <b>Project Gutenberg</b>（公有领域）自动生成；仔细阅读与长篇匹配是原创题；不含真题。',
     ],
   },
-  read: {
-    t: '阅读怎么用',
+  __type: {
+    t: '这个题型怎么用',
     items: [
-      '三种题型，分值按真题：<b>仔细阅读 14.2 分/题</b>（最高，优先练）· 长篇匹配 7.1 分/题 · 选词填空 3.55 分/题。',
-      '选好答案点 <b>提交</b> 才判分，判完每题都有中文解析。答错的自动进 <b>错题本</b>。',
-      '点正文里<b>颜色可点的词</b>：看释义、<b>加入生词本</b>、<b>划线</b>。点同一个词或点空白处取消标记。',
-      '已经收进生词本的词会带一条<b>虚线</b>，一眼看得出哪些查过了；划过的线会一直留着。',
-      '做题时点选项前面的<b>字母 A / B / C / D</b>，可以把这个选项<b>划掉</b>（不影响你作答），方便用排除法。',
-      '如果导入过自己的题目，会带 <b>「我的题目」</b> 标签排在最前面。',
-    ],
-  },
-  listen: {
-    t: '听力怎么用',
-    items: [
-      '点 ▶ 播放（用浏览器自带朗读，不用联网下音频）。',
-      '听不清就<b>多点几次</b>，也能切成 0.7× / 0.85× 慢速。',
-      '把听到的句子打出来，点 <b>提交</b> 自动比对。',
-      '判分<b>忽略大小写和标点</b>，只比单词，不用纠结标点。',
-      '实在听不出来点 <b>跳过</b>，后面还会再遇到。',
+      '底部导航里的每一项就是当前考试的一种题型，左右可以滑动。',
+      '标着 <b>「还没做」</b>的题型点进去会说明它是什么 —— 它还没实现，暂时刷不了。',
+      '已做好的题型：<b>仔细阅读 · 长篇匹配 · 选词填空 · 听力听写</b>。',
+      '选好答案点 <b>提交</b> 才判分，判完每题都有中文解析；答错的自动进 <b>错题本</b>（在「我的」里）。',
+      '点正文里<b>颜色可点的词</b>：看释义、加入生词本、<b>划线</b>；点同一个词或点空白处取消。',
+      '做题时点选项前面的<b>字母 A / B / C / D</b> 可以把这个选项划掉（不影响作答），方便排除法。',
+      '听力听写：点 ▶ 播放（浏览器朗读），听不清多点几次，也能切慢速；判分忽略大小写和标点。',
     ],
   },
   vocab: {
@@ -1419,7 +1437,8 @@ const HELP = {
 };
 
 function vHelp() {
-  const h = HELP[route] || HELP.home;
+  const key = route.indexOf('type:') === 0 ? '__type' : route;
+  const h = HELP[key] || HELP.home;
   return `<div class="card tight helpcard">
     <div class="h">${esc(h.t)}</div>
     <ul>${h.items.map(x => '<li>' + x + '</li>').join('')}</ul>
@@ -1451,9 +1470,8 @@ function vOnboard() {
       </div>
     </div>`).join('')}
   <div class="card tight">
-    <div class="meta">实心的那个（<b>大学英语四级</b>）是站内已经有题库的。
-      其余考试需要你用自己的资料 —— 这个站<b>不带任何版权内容</b>，
-      把题导进「我的题目」就能刷。</div>
+    <div class="meta">现在站里<b>还没有任何题目</b> —— 选完考试，去「我的 → 我的题目」
+      把自己手上的资料导进来就能刷。这个站<b>不带任何版权内容</b>，题目由使用者自己提供。</div>
   </div>
   <div class="card tight">
     <div class="row" style="margin:0">
@@ -1479,32 +1497,31 @@ function render() {
   }
   const hb1 = $('#hdHelp');
   if (hb1) hb1.style.display = '';
+  const isType = route.indexOf('type:') === 0;
+  if (isType) readType = route.slice(5);      // 题型页：当前题型跟着路由走
   header();
   renderNav();
-  if (route !== 'vocab') vMode = 'list';   // 离开生词页就退出复习态
+  if (route !== 'vocab') vMode = 'list';      // 离开生词页就退出复习态
   const hb = $('#hdHelp');
   if (hb) hb.classList.toggle('on', helpOpen);
-  const body = route === 'read' ? vRead()
-    : route === 'listen' ? vListen()
-    : route === 'vocab' ? vVocab()
+  const body = route === 'vocab' ? vVocab()
     : route === 'me' ? vMe()
+    : isType ? vTypePage(readType)
     : vHome();
   $('#view').innerHTML = (helpOpen ? vHelp() : '') + body;
   applyMarks();                        // 把划线/排除线画回去
-  if (route === 'listen') bindListen();
+  if (isType && readType === 'listen') bindListen();
 }
 
 /* ---------- 事件 ---------- */
 document.addEventListener('click', e => {
   if (e.target.closest('#hdHelp')) { helpOpen = !helpOpen; render(); return; }
   const g = e.target.closest('[data-go]'); if (g) { go(g.dataset.go); return; }
-  const rt = e.target.closest('[data-rt]');
-  if (rt) { readType = rt.dataset.rt; draft = null; render(); return; }
 });
 
-/* 阅读：选项 / 提交 / 下一题 / 重做 */
+/* 题型页：选项 / 提交 / 下一题 / 重做 */
 document.addEventListener('click', e => {
-  if (route !== 'read' || readType === 'wrong') return;
+  if (route.indexOf('type:') !== 0) return;
   const t = S.bank.types.find(x => x.type === readType);
   if (!t) return;
   const i = Math.min(stateOf(readType), t.items.length - 1);
@@ -1560,7 +1577,7 @@ document.addEventListener('click', e => {
 
 document.addEventListener('change', e => {
   const sel = e.target.closest('[data-sel]');
-  if (!sel || route !== 'read' || readType === 'wrong') return;
+  if (!sel || route.indexOf('type:') !== 0) return;
   const t = S.bank.types.find(x => x.type === readType);
   const i = Math.min(stateOf(readType), t.items.length - 1);
   if (LS.get('ans:' + readType + ':' + i, null)) return;
@@ -1813,7 +1830,7 @@ async function boot() {
     onboarding = !LS.get('onboarded', false);
 
     const h = location.hash.replace('#', '');
-    if (['home', 'read', 'listen', 'vocab', 'me'].includes(h)) route = h;
+    if (['home', 'vocab', 'me'].includes(h) || h.indexOf('type:') === 0) route = h;
 
     if (IN) {
       S.dict = IN.dict || {};

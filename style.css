@@ -88,6 +88,11 @@ nav button .ic { font-size: 18px; line-height: 1; filter: grayscale(1) opacity(.
 nav button.on { color: var(--brand); font-weight: 500; }
 nav button.on .ic { filter: none; }
 
+/* 题型多的时候（雅思 9 项）横向滚动，不挤压每个按钮 */
+nav.wide { overflow-x: auto; justify-content: flex-start; scrollbar-width: none; }
+nav.wide::-webkit-scrollbar { display: none; }
+nav.wide button { flex: 0 0 auto; min-width: 64px; padding-left: 8px; padding-right: 8px; }
+
 /* 卡片 */
 .card {
   background: var(--card); border: 1px solid var(--line);
