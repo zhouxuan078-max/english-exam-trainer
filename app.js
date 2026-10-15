@@ -202,8 +202,11 @@ function vExamPick() {
       <button class="btn sm" data-examsave="1">保存日期</button>
       ${cur.custom ? `<button class="btn ghost sm" data-examreset="1">恢复默认</button>` : ''}
     </div>
-    <div class="meta" style="margin-top:6px">${esc(cur.note || '')}${
+    <div class="row" style="margin-top:6px">${esc(cur.note || '')}${
       dn !== null ? ' · 还有 ' + dn + ' 天' : ' · 还没设日期'}</div>
+    <div class="row" style="margin:12px 0 0">
+      <button class="btn ghost sm" data-repick="1">重新选考试</button>
+    </div>
   </div>`;
 }
 const S = { bank: null, dict: null, listen: null };
@@ -482,6 +485,7 @@ function applyMarks() {
 let route = 'home', readType = 'careful';
 let helpOpen = false;      // 右上角「!」展开的说明面板
 let onboarding = false;    // 首次进来：先选考试
+let onboardReturn = 'home'; // 从哪一页点进"选考试"的，返回时退回去
 
 function go(r) {
   route = r;
@@ -1406,7 +1410,7 @@ const HELP = {
   me: {
     t: '这一页在说什么',
     items: [
-      '<b>我的考试</b>：选你要考的那一个（四级、六级、雅思、托福…），首页名称和倒计时跟着变；日期自己填。题目由「我的题目」导入。',
+      '<b>我的考试</b>：选你要考的那一个（四级、六级、雅思、托福…），首页名称和倒计时跟着变。选错了不要紧 —— 区块里有 <b>「重新选考试」</b>，随时能回到选考试那一屏。',
       '<b>我的题目</b>：这个站<b>不带任何版权资料</b>。你自己买的、老师发的资料，导进来只存在你这台设备的浏览器里，不上传、别人看不到。',
       '<b>关于与版权</b>：开源语料取自 Project Gutenberg（公有领域），原创题由作者撰写，<b>不含四级真题</b>。',
       '所有数据（错题 / 生词 / 打卡）都在<b>你自己浏览器本地</b>，清浏览器数据会丢。',
@@ -1422,8 +1426,10 @@ function vHelp() {
   </div>`;
 }
 
-/* 首次进来的"选考试"页 */
+/* 首次进来的"选考试"页。也用于从「我的」里回来换考试 ——
+   所以底部一定要有"出去"的路：误点了、选错了都得能退。 */
 function vOnboard() {
+  const picked = !!LS.get('onboarded', false);
   const groups = [];
   EXAMS.forEach(e => {
     let g = groups.find(x => x.n === e.group);
@@ -1434,7 +1440,7 @@ function vOnboard() {
   <div class="card">
     <div class="ttl">你要考哪一个？</div>
     <div class="meta">选完就进训练台，界面只出现这个考试需要的题型。
-      以后想换，去「我的 → 我的考试」，随时能改。</div>
+      ${picked ? '这次是回来换考试的。' : ''}</div>
   </div>
   ${groups.map(g => `
     <div class="sec">${esc(g.n)}</div>
@@ -1448,6 +1454,14 @@ function vOnboard() {
     <div class="meta">实心的那个（<b>大学英语四级</b>）是站内已经有题库的。
       其余考试需要你用自己的资料 —— 这个站<b>不带任何版权内容</b>，
       把题导进「我的题目」就能刷。</div>
+  </div>
+  <div class="card tight">
+    <div class="row" style="margin:0">
+      <button class="btn ghost" data-obout="1">${picked ? '← 返回训练台' : '先不选，用四级试试'}</button>
+    </div>
+    <div class="meta" style="margin-top:8px">
+      选错了没关系：进去以后在「我的 → 我的考试」里随时能换，也能再回到这一页。
+    </div>
   </div>`;
 }
 
@@ -1677,6 +1691,28 @@ document.addEventListener('click', e => {
     if (confirm('清空我自己导入的题目？（其它数据不受影响）')) {
       LS.set('mybank', null); rebuildBank(); render(); toast('已清空我的题目');
     }
+    return;
+  }
+  /* 选考试页的出路：首次进来 = 先用四级；从「我的」回来 = 退回原来那一页 */
+  if (e.target.closest('[data-obout]')) {
+    const first = !LS.get('onboarded', false);
+    if (first) {
+      LS.set('exam', { id: DEFAULT_EXAM_ID });
+      LS.set('onboarded', true);
+      toast('先用四级的题库刷着，随时能在「我的」里换');
+    }
+    onboarding = false;
+    route = first ? 'home' : (onboardReturn || 'home');
+    if (location.hash !== '#' + route) history.replaceState(null, '', '#' + route);
+    render();
+    return;
+  }
+  /* 从「我的」回到选考试页（记住从哪来的，返回时退回去） */
+  if (e.target.closest('[data-repick]')) {
+    onboardReturn = route;
+    onboarding = true;
+    window.scrollTo(0, 0);
+    render();
     return;
   }
   /* 选考试 / 改考试日期 */
