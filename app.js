@@ -510,7 +510,6 @@ function vExamPick() {
       <input type="date" id="examdate" value="${cur.date}"
         style="font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
       <button class="btn sm" data-examsave="1">保存</button>
-      ${cur.custom ? `<button class="btn ghost sm" data-examreset="1">清除</button>` : ''}
     </div>
     ${dn !== null ? `<div class="meta" style="margin:7px 0 0">还有 <b>${dn}</b> 天</div>` : ''}
   </div>
@@ -677,6 +676,14 @@ function wordPopHtml(raw, hit) {
 }
 
 document.addEventListener('click', e => {
+  if (e.target.closest('[data-copyopen]')) {
+    const ctx0 = curReadItem();
+    const txt0 = ctx0 ? (((ensureDraft(ctx0.t, ctx0.i).x) || {}).text
+      || (((LS.get('ans:' + ctx0.key, null) || {}).x) || {}).text) : '';
+    if (!txt0) { toast('还没写东西'); return; }
+    copyText(txt0).then(okc => toast(okc ? '已复制，粘贴给 AI 就能打分' : '复制失败，请手动选中复制'));
+    return;
+  }
   if (e.target.closest('[data-clearul]')) {
     const ctx = curReadItem();
     if (ctx) { clearRangeMarks(ctx.key); render(); toast('已清除划线'); }
@@ -1109,7 +1116,11 @@ function vItem(t, i) {
           isTr ? cc(myText) + ' 字' : wc(myText) + ' 词'}</div>`;
     } else {
       h += `<div class="sub"><div class="meta">你的作答</div>
-        <div style="white-space:pre-wrap;line-height:1.8">${esc(myText) || '<i>（空）</i>'}</div></div>`;
+        <div style="white-space:pre-wrap;line-height:1.8">${esc(myText) || '<i>（空）</i>'}</div>
+        <div class="meta" style="margin-top:8px">
+          <button class="btn ghost sm" data-copyopen="1">复制我的作答</button>
+          <span style="margin-left:6px">发给 AI，可以让它按这场考试的标准打分</span>
+        </div></div>`;
     }
     h += resultRow(t, i, 0, done, d);
     if (done) {
@@ -1249,12 +1260,11 @@ function resultRow(t, i, total, done, d) {
     const txt = (d.x && d.x.text) || '';
     const isTr = t.type === 'translate';
     if (!done) {
-      return `<div class="result"><button class="btn" data-submit="1">提交，看参考${
-        isTr ? '译文' : (t.type === 'speak' ? '回答' : '范文')}</button>
+      return `<div class="result"><button class="btn" data-submit="1">提交</button>
         <button class="btn ghost sm" data-reset="1">重做</button></div>${pagerRow(t, i)}`;
     }
     return `<div class="result">
-      <span class="score">已提交 · ${isTr ? cc(txt) + ' 字' : wc(txt) + ' 词'} · 不看分，自己对照</span>
+      <span class="score">已提交 · ${isTr ? cc(txt) + ' 字' : wc(txt) + ' 词'}</span>
       <button class="btn ghost sm" data-next="1">下一篇 →</button>
       <button class="btn ghost sm" data-reset="1">重做</button></div>`;
   }
@@ -2134,6 +2144,29 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-lnext]')) { li = (li + 1) % S.listen.items.length; render(); return; }
 });
 
+/* 复制文本：优先用 clipboard API，不行就退回 textarea + execCommand
+   （file:// 下 clipboard API 常常不可用） */
+function copyText(txt) {
+  const fallback = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = txt;
+      ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) { return false; }
+  };
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(txt).then(() => true, fallback);
+    }
+  } catch (e) { /* 落到 fallback */ }
+  return Promise.resolve(fallback());
+}
+
 /* 开放式作答（写 / 译 / 说）：不判分、不进正确率，只记打卡。
    参考范文放在题目的 sample / reference 里，提交后自己对照。 */
 function submitOpen(t, i, d) {
@@ -2328,16 +2361,16 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-examsave]')) {
     const dtEl = $('#examdate');
     const dt = (dtEl && dtEl.value) || '';
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dt)) { toast('请先选一个考试日期'); return; }
+    // 输入框空着点保存 = 把日期清掉（这样就不用再多一个「清除」按钮）
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dt)) {
+      setExam({ date: null });
+      render();
+      toast('已清除考试日期');
+      return;
+    }
     setExam({ id: examInfo().id, date: dt });
     render();
     toast('已把考试日期设为 ' + dt);
-    return;
-  }
-  if (e.target.closest('[data-examreset]')) {
-    setExam({ date: null });
-    render();
-    toast('已清除考试日期');
     return;
   }
   if (e.target.closest('[data-clearvocab]')) {
