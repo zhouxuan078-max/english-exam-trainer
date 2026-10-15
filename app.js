@@ -133,6 +133,15 @@ function missingTypes(id) {
   return (ex.types || []).filter(t => !(QTYPES[t] || {}).impl);
 }
 
+/* 阅读类题型（它们共用"阅读"页里的那排 tab） */
+const READ_TYPES = ['careful', 'matching', 'cloze', 'single', 'judge', 'gap'];
+function examReadTypes(id) {
+  return implTypes(id).filter(t => READ_TYPES.indexOf(t) >= 0);
+}
+function examHasListen(id) {
+  return implTypes(id).indexOf('listen') >= 0;
+}
+
 function examDateObj() {
   const d = examInfo().date;
   if (!d) return null;
@@ -472,18 +481,50 @@ function applyMarks() {
 /* ---------- 路由 ---------- */
 let route = 'home', readType = 'careful';
 let helpOpen = false;      // 右上角「!」展开的说明面板
+let onboarding = false;    // 首次进来：先选考试
 
 function go(r) {
   route = r;
   if (location.hash !== '#' + r) history.replaceState(null, '', '#' + r);
-  document.querySelectorAll('nav button').forEach(b =>
-    b.classList.toggle('on', b.dataset.nav === r || (r === 'read' && b.dataset.nav === 'read')));
   window.scrollTo(0, 0);
   render();
 }
 
-document.querySelectorAll('nav button').forEach(b =>
-  b.addEventListener('click', () => go(b.dataset.nav)));
+/* 底部导航：按当前考试的题型动态生成。
+   比如选了没有「听力听写」的考试，就不显示"听力"这一项 ——
+   界面只出现这个考试真正需要的题型。 */
+const NAV_ALL = [
+  { k: 'home',   ic: '🏠', n: '首页' },
+  { k: 'read',   ic: '📖', n: '阅读', need: 'read' },
+  { k: 'listen', ic: '🎧', n: '听力', need: 'listen' },
+  { k: 'vocab',  ic: '🔖', n: '生词' },
+  { k: 'me',     ic: '📊', n: '我的' },
+];
+
+function navItems() {
+  return NAV_ALL.filter(x => {
+    if (x.need === 'read') return examReadTypes().length > 0;
+    if (x.need === 'listen') return examHasListen();
+    return true;
+  });
+}
+
+function renderNav() {
+  const nav = document.querySelector('nav');
+  if (!nav) return;
+  if (onboarding) { nav.innerHTML = ''; return; }
+  const items = navItems();
+  if (!items.some(x => x.k === route)) route = 'home';   // 当前页被裁掉了就回首页
+  nav.innerHTML = items.map(x =>
+    `<button data-nav="${x.k}" class="${route === x.k ? 'on' : ''}">` +
+    `<span class="ic">${x.ic}</span>${x.n}</button>`).join('');
+}
+
+/* 导航是动态重建的，所以用事件委托绑点击 */
+document.addEventListener('click', e => {
+  const b = e.target.closest('nav button[data-nav]');
+  if (b) { go(b.dataset.nav); return; }
+});
 
 window.addEventListener('hashchange', () => {
   const h = location.hash.replace('#', '');
@@ -492,9 +533,14 @@ window.addEventListener('hashchange', () => {
 
 /* ---------- 顶栏 ---------- */
 function header() {
-  const map = { home: ['四级训练台', '把今天的量做完就行'], read: ['阅读', '三种题型对齐真题'],
-                listen: ['听力听写', '浏览器朗读，跟读默写'], vocab: ['生词本', '点短文里的词就能收藏'],
-                me: ['我的', '数据都在你自己手机上'] };
+  const rt = examReadTypes().map(t => (QTYPES[t] || {}).name).filter(Boolean);
+  const map = {
+    home: [examShort(), '把今天的量做完就行'],
+    read: ['阅读', rt.length ? rt.join(' · ') : '先导入题目'],
+    listen: ['听力听写', '浏览器朗读，跟读默写'],
+    vocab: ['生词本', '点短文里的词就能收藏'],
+    me: ['我的', '数据都在你自己手机上'],
+  };
   const m = map[route] || map.home;
   $('#hdTitle').textContent = m[0];
   $('#hdSub').textContent = m[1];
@@ -575,8 +621,19 @@ function stateOf(type) { return prog[type] || 0; }
 function setState(type, i) { prog[type] = i; LS.set('prog', prog); }
 
 function vRead() {
-  if (!readType || !S.bank.types.some(t => t.type === readType)) readType = S.bank.types[0].type;
-  const tabs = S.bank.types.map(t =>
+  if (!S.bank.types.length) return `<div class="card"><div class="empty">题库是空的</div></div>`;
+
+  // 只显示"当前考试需要、且题库里确实有"的题型。
+  // 完全不匹配时（比如选了雅思但题库是四级的）就全显示，并说明一句。
+  const need = examReadTypes();
+  let types = S.bank.types.filter(t => need.indexOf(t.type) >= 0);
+  const mismatch = !types.length;
+  if (mismatch) types = S.bank.types;
+
+  if (!readType || (readType !== 'wrong' && !types.some(t => t.type === readType))) {
+    readType = types[0].type;
+  }
+  const tabs = types.map(t =>
     `<button class="tab${t.type === readType ? ' on' : ''}" data-rt="${t.type}">${esc(t.typeName)}<span class="n">${t.items.length}</span></button>`
   ).join('') + `<button class="tab${readType === 'wrong' ? ' on' : ''}" data-rt="wrong">错题本<span class="n">${wrong.length}</span></button>`;
 
@@ -587,7 +644,12 @@ function vRead() {
     const i = Math.min(stateOf(readType), t.items.length - 1);
     body = vItem(t, i);
   }
-  return `<div class="tabs">${tabs}</div>${body}`;
+  const notice = mismatch
+    ? `<div class="card tight"><div class="meta">这些题不属于 <b>${esc(examShort())}</b>，
+        先用它们练手可以，但界面要变成这个考试的题型，得先把对应题型做出来
+        （去「我的 → 我的考试」能看到还缺哪些）。</div></div>`
+    : '';
+  return `<div class="tabs">${tabs}</div>${notice}${body}`;
 }
 
 function originTag(it) {
@@ -1360,8 +1422,51 @@ function vHelp() {
   </div>`;
 }
 
+/* 首次进来的"选考试"页 */
+function vOnboard() {
+  const groups = [];
+  EXAMS.forEach(e => {
+    let g = groups.find(x => x.n === e.group);
+    if (!g) { g = { n: e.group, items: [] }; groups.push(g); }
+    g.items.push(e);
+  });
+  return `
+  <div class="card">
+    <div class="ttl">你要考哪一个？</div>
+    <div class="meta">选完就进训练台，界面只出现这个考试需要的题型。
+      以后想换，去「我的 → 我的考试」，随时能改。</div>
+  </div>
+  ${groups.map(g => `
+    <div class="sec">${esc(g.n)}</div>
+    <div class="card tight">
+      <div class="row" style="margin:0;gap:6px">
+        ${g.items.map(e => `<button class="btn ${e.builtin ? '' : 'ghost'} sm" data-exam="${e.id}"
+          style="font-size:12px;padding:6px 11px">${esc(e.short || e.name)}</button>`).join('')}
+      </div>
+    </div>`).join('')}
+  <div class="card tight">
+    <div class="meta">实心的那个（<b>大学英语四级</b>）是站内已经有题库的。
+      其余考试需要你用自己的资料 —— 这个站<b>不带任何版权内容</b>，
+      把题导进「我的题目」就能刷。</div>
+  </div>`;
+}
+
 function render() {
+  if (onboarding) {
+    $('#hdTitle').textContent = '四级训练台';
+    $('#hdSub').textContent = '先选一下你要考的试';
+    $('#hdCount').textContent = '';
+    $('#hdClock').textContent = '';
+    const hb0 = $('#hdHelp');
+    if (hb0) hb0.style.display = 'none';
+    renderNav();
+    $('#view').innerHTML = vOnboard();
+    return;
+  }
+  const hb1 = $('#hdHelp');
+  if (hb1) hb1.style.display = '';
   header();
+  renderNav();
   if (route !== 'vocab') vMode = 'list';   // 离开生词页就退出复习态
   const hb = $('#hdHelp');
   if (hb) hb.classList.toggle('on', helpOpen);
@@ -1579,6 +1684,12 @@ document.addEventListener('click', e => {
     const id = e.target.closest('[data-exam]').dataset.exam;
     if (!EXAMS_BY_ID[id]) return;
     LS.set('exam', { id });          // 换考试时不带旧日期
+    if (onboarding) {                // 首次选完就进训练台
+      LS.set('onboarded', true);
+      onboarding = false;
+      route = 'home';
+      if (location.hash !== '#home') history.replaceState(null, '', '#home');
+    }
     render();
     toast('已选择：' + (EXAMS_BY_ID[id].short || EXAMS_BY_ID[id].name));
     return;
@@ -1661,6 +1772,9 @@ async function boot() {
     // 把「自备材料」和「我自己导入的题目」合并进来。
     // 用重建而不是追加，避免重复调用时越叠越多。
     rebuildBank();
+
+    // 第一次进来：先让用户选考试，选完再进训练台
+    onboarding = !LS.get('onboarded', false);
 
     const h = location.hash.replace('#', '');
     if (['home', 'read', 'listen', 'vocab', 'me'].includes(h)) route = h;
