@@ -1666,7 +1666,8 @@ function vMe() {
         <code>=== 选词填空 ===</code> <code>=== 听力 ===</code>
       </div>
       <div class="meta" style="margin-top:2px">
-        能导的就这四类（＝本站已经搭好的题型）。${(() => {
+        导入目前只认上面这四类分节标题（单项选择 / 判断 / 听力理解这几种
+        本站能做、但还没有对应的导入格式，稍后再补）。${(() => {
           const ei = examInfo();
           const miss = ei.types.filter(t => !(QTYPES[t] || {}).impl);
           if (!miss.length) return '';
