@@ -146,6 +146,14 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .w { cursor: pointer; border-radius: 3px; }
 .w.hit { background: var(--ok-soft); box-shadow: inset 0 -2px 0 var(--ok); }
 .w.miss { background: var(--warn-soft); box-shadow: inset 0 -2px 0 var(--warn); }
+/* 自己划的线（持久保留） */
+.w.ul { box-shadow: inset 0 -2px 0 var(--brand); }
+/* 已经在生词本里的词 */
+.w.saved { border-bottom: 1px dashed var(--fg3); }
+/* 排除掉的选项（点前面的字母切换） */
+.opt.strike > span:last-child { text-decoration: line-through; color: var(--fg3); }
+.opt .k { cursor: pointer; }
+.opt.strike .k { opacity: .5; }
 
 /* 题目 */
 .q { padding: 14px 0; border-bottom: 1px solid var(--line); }
@@ -222,7 +230,7 @@ select {
   box-shadow: 0 6px 24px rgba(0,0,0,.25);
 }
 .pop b { font-size: 16px; }
-.pop .add { margin-top: 8px; display: flex; gap: 8px; }
+.pop .add { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
 .pop .add button {
   padding: 6px 12px; border-radius: 7px; border: 0; cursor: pointer;
   font-size: 12px; background: var(--brand); color: #fff; font-family: inherit;

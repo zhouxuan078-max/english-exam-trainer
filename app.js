@@ -1,19 +1,69 @@
 /* 四级训练台 — 纯前端，无后端，进度存本地 */
 'use strict';
 
-/* 考试场次。
-   四级一年两场（6 月 / 12 月），日期每年不同，**以中国教育考试网公告为准**，
-   不要自己按"第几个周六"去推。想加新场次就往这里加一条；
-   使用者也能在「我的 → 我的考试场次」里自定义日期。 */
-const EXAM_SESSIONS = [
-  { id: '2026-06', date: '2026-06-13', label: '2026 年 6 月',
-    note: '上半年 · 英语四级 上午 9:00-11:20' },
-  { id: '2026-12', date: '2026-12-12', label: '2026 年 12 月',
-    note: '下半年 · 英语四级 上午 9:00-11:20' },
-];
-
-/* 题型分值说明（与具体哪一场无关） */
+/* 考试信息。
+   默认取题库自带的那条（大学英语四级 / 2026-12-12），
+   使用者在「我的 → 我的考试」里可以改成**任何考试和任何日期** ——
+   四级、六级、雅思、托福、高考、考研都行，站本身不限定考试类型。
+   日期不写死：四级一年两场（6 月 / 12 月），每年日期由官方另行公布。 */
 const EXAM_STRUCT = '写作 15% · 听力 35% · 阅读 35% · 翻译 15%';
+
+function examInfo() {
+  const e = LS.get('exam', null);
+  if (e && e.date) {
+    return { name: e.name || '我的考试', date: e.date, custom: true,
+             note: '你自己设的考试' };
+  }
+  const d = (S.bank && S.bank.exam) || {};
+  return { name: d.name || '大学英语四级', date: d.date || '',
+           note: d.note || '', site: true };
+}
+
+function examShort() {
+  const n = examInfo().name || '考试';
+  return n.replace(/[（(].*$/, '').trim() || '考试';
+}
+
+function examDateObj() {
+  const d = examInfo().date;
+  if (!d) return null;
+  const o = new Date(d + 'T09:00:00+08:00');
+  return isNaN(o.getTime()) ? null : o;
+}
+
+function examPassed() {
+  const o = examDateObj();
+  return !!o && o.getTime() < Date.now();
+}
+
+function daysToExam() {
+  const o = examDateObj();
+  if (!o) return null;
+  return Math.max(0, Math.ceil((o - Date.now()) / 86400000));
+}
+
+/* 「我的 → 我的考试」：名称 + 日期都能改 */
+function vExamPick() {
+  const cur = examInfo();
+  const dn = daysToExam();
+  return `
+  <div class="sec">我的考试</div>
+  <div class="card tight">
+    <div class="meta">填你要考的考试和日期，首页倒计时按这个算。四级、六级、雅思、托福、高考、考研都能填。</div>
+    <div class="row" style="margin-bottom:8px">
+      <input id="examname" value="${esc(cur.name)}" placeholder="考试名称，如 雅思 / 高考"
+        style="flex:1;min-width:120px;font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
+      <input type="date" id="examdate" value="${cur.date}"
+        style="font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
+      <button class="btn sm" data-examsave="1">保存</button>
+    </div>
+    <div class="meta">当前：<b>${esc(cur.name)}</b>${
+      cur.date ? ' · ' + cur.date : ' · <span style="color:var(--warn)">还没设日期</span>'}${
+      cur.custom ? ' · 你自己设的' : ' · 默认值'}${
+      examPassed() ? ' · <span style="color:var(--warn)">这场已经结束了</span>' : ''}${
+      dn !== null ? ' · 还有 ' + dn + ' 天' : ''}</div>
+  </div>`;
+}
 const S = { bank: null, dict: null, listen: null };
 const LS = {
   get(k, d) { try { const v = localStorage.getItem('cet4:' + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
@@ -140,29 +190,58 @@ document.addEventListener('click', e => {
   clearMark();
   const raw = el.dataset.w;
   const hit = lookup(raw);
-  if (hit) {
-    el.classList.add('hit');
-    pop.innerHTML = `<b>${esc(hit.word)}</b> ${hit.p ? '<span style="opacity:.7">/' + esc(hit.p) + '/</span>' : ''}
-      <div style="margin-top:4px">${esc(hit.m || '（暂无释义）')}</div>
-      <div class="add"><button data-add="${esc(hit.word)}|${esc(hit.p || '')}|${esc(hit.m || '')}">加入生词本</button>
-      <button class="sec" data-close="1">关闭</button></div>`;
-  } else {
-    el.classList.add('miss');
-    pop.innerHTML = `<b>${esc(raw)}</b><div style="margin-top:4px">本地四级词库未收录（可先收藏，稍后补释义）</div>
-      <div class="add"><button data-add="${esc(raw.toLowerCase())}||">仍要收藏</button>
-      <button class="sec" data-close="1">关闭</button></div>`;
-  }
+  el.classList.add(hit ? 'hit' : 'miss');
+  if (vocab.some(v => v.word === (hit ? hit.word : raw).toLowerCase())) el.classList.add('saved');
+  pop.innerHTML = wordPopHtml(raw, hit);
   markedEl = el;
   pop.classList.remove('hide');
 });
 
+/* 弹层内容：加"已在生词本"状态 + 划线按钮 */
+function wordPopHtml(raw, hit) {
+  const lw = raw.toLowerCase();
+  const key = (hit ? hit.word : lw).toLowerCase();
+  const inVocab = vocab.some(v => v.word === key);
+  const ctx = curReadItem();
+  const ulOn = ctx ? (((marks[ctx.key] || {}).w) || []).indexOf(lw) >= 0 : false;
+  const head = hit
+    ? `<b>${esc(hit.word)}</b> ${hit.p ? '<span style="opacity:.7">/' + esc(hit.p) + '/</span>' : ''}
+       <div style="margin-top:4px">${esc(hit.m || '（暂无释义）')}</div>`
+    : `<b>${esc(raw)}</b><div style="margin-top:4px">本地词库未收录（可先收藏，稍后补释义）</div>`;
+  const addBtn = inVocab
+    ? `<button class="sec" disabled>已在生词本</button>`
+    : `<button data-add="${esc(key)}|${esc(hit ? (hit.p || '') : '')}|${esc(hit ? (hit.m || '') : '')}">加入生词本</button>`;
+  const ulBtn = ctx
+    ? `<button class="sec" data-markw="${esc(lw)}">${ulOn ? '取消划线' : '划线'}</button>`
+    : '';
+  return head + `<div class="add">${addBtn}${ulBtn}<button class="sec" data-close="1">关闭</button></div>`;
+}
+
 document.addEventListener('click', e => {
+  /* 划线 / 取消划线 */
+  const mk = e.target.closest('[data-markw]');
+  if (mk) {
+    const ctx = curReadItem();
+    if (ctx) {
+      const w = mk.dataset.markw;
+      const on = toggleWordMark(ctx.key, w);
+      document.querySelectorAll('.w[data-w]').forEach(x => {
+        if ((x.dataset.w || '').toLowerCase() === w) x.classList.toggle('ul', on);
+      });
+      mk.textContent = on ? '取消划线' : '划线';
+    }
+    return;
+  }
   const b = e.target.closest('[data-add]');
   if (b) {
     const [w, p, m] = b.dataset.add.split('|');
     addVocab(w, p, m);
-    clearMark();
-    $('#pop').classList.add('hide');
+    // 不关闭弹层：让使用者看到"已加入"这个状态变化
+    document.querySelectorAll('.w[data-w]').forEach(x => {
+      if ((x.dataset.w || '').toLowerCase() === w) x.classList.add('saved');
+    });
+    b.textContent = '已在生词本';
+    b.disabled = true;
     toast('已加入生词本');
     return;
   }
@@ -191,61 +270,6 @@ function streak() {
   return n;
 }
 
-/* 当前用哪一场：使用者选过就听他的；没选过就取最近的一场未来考试 */
-function examInfo() {
-  const sel = LS.get('exam', null);
-  if (sel && sel.custom && sel.date) {
-    return { date: sel.date, label: '自定义', note: '你自己设定的考试日期', custom: true };
-  }
-  if (sel && sel.id) {
-    const s = EXAM_SESSIONS.find(x => x.id === sel.id);
-    if (s) return { date: s.date, label: s.label, note: s.note, id: s.id };
-  }
-  const t = today();
-  const up = EXAM_SESSIONS.filter(s => s.date >= t);
-  const pick = up.length ? up[0] : EXAM_SESSIONS[EXAM_SESSIONS.length - 1];
-  return { date: pick.date, label: pick.label, note: pick.note, id: pick.id, auto: true };
-}
-
-function examDateObj() {
-  return new Date(examInfo().date + 'T09:00:00+08:00');
-}
-
-function examPassed() {
-  return examDateObj().getTime() < Date.now();
-}
-
-function daysToExam() {
-  return Math.max(0, Math.ceil((examDateObj() - Date.now()) / 86400000));
-}
-
-/* 「我的 → 我的考试场次」的选择界面 */
-function vExamPick() {
-  const cur = examInfo();
-  const sel = LS.get('exam', null);
-  const isAuto = !sel || (!sel.id && !sel.custom);
-  const btn = (on, attr, txt) =>
-    `<button class="btn ${on ? '' : 'ghost'} sm" ${attr}>${txt}</button>`;
-  return `
-  <div class="sec">我的考试场次</div>
-  <div class="card tight">
-    <div class="meta">四级一年两场（6 月 / 12 月）。选你报名的那一场，倒计时跟着变。</div>
-    <div class="row" style="margin-bottom:6px">
-      ${btn(isAuto, 'data-exam="auto"', '自动（最近一场）')}
-      ${EXAM_SESSIONS.map(s => btn(!!(sel && sel.id === s.id), `data-exam="${s.id}"`, s.label)).join('')}
-      ${btn(!!(sel && sel.custom), 'data-exam="custom"', '自定义日期')}
-    </div>
-    <div id="exampanel" style="display:${(sel && sel.custom) ? 'block' : 'none'};margin-bottom:6px">
-      <input type="date" id="examdate" value="${cur.date}"
-        style="font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-family:inherit">
-      <button class="btn sm" data-examsave="1" style="margin-left:6px">保存</button>
-    </div>
-    <div class="meta">当前：<b>${esc(cur.label)}</b> · ${cur.date}${
-      cur.note ? ' · ' + esc(cur.note) : ''}${
-      examPassed() ? ' · <span style="color:var(--warn)">这场已经结束了</span>' : ''}</div>
-  </div>`;
-}
-
 /* ---------- 正文渲染 ----------
    只把本地词库收录的词包成可点 span。
    查不到的基本是初中阶段的词，本来也不用查 —— 这样点下去必有释义。 */
@@ -253,6 +277,62 @@ function wrap(text) {
   return esc(text).replace(/[A-Za-z][A-Za-z'\-]*/g, m => {
     if (!S.dict) return m;
     return lookup(m) ? `<span class="w" data-w="${m}">${m}</span>` : m;
+  });
+}
+
+/* ---------- 做题时的标记：划线 / 排除选项 ----------
+   按"题型:题目id"分开存，重渲染不会丢，也不会串到别的题上。 */
+let marks = LS.get('marks', {});    // { 'careful:xxx': { w:['word'], o:['0:2'] } }
+
+function curReadItem() {
+  if (route !== 'read') return null;
+  const t = S.bank && S.bank.types.find(x => x.type === readType);
+  if (!t) return null;
+  const i = prog[readType] || 0;
+  const it = t.items[i];
+  if (!it) return null;
+  return { t, i, it, key: readType + ':' + it.id };
+}
+
+function getMarks(key) {
+  if (!marks[key]) marks[key] = { w: [], o: [] };
+  if (!Array.isArray(marks[key].w)) marks[key].w = [];
+  if (!Array.isArray(marks[key].o)) marks[key].o = [];
+  return marks[key];
+}
+
+function toggleWordMark(key, word) {
+  const m = getMarks(key);
+  const i = m.w.indexOf(word);
+  if (i >= 0) m.w.splice(i, 1); else m.w.push(word);
+  LS.set('marks', marks);
+  return i < 0;                     // true = 现在划上了
+}
+
+function toggleOptMark(key, pick) {
+  const m = getMarks(key);
+  const i = m.o.indexOf(pick);
+  if (i >= 0) m.o.splice(i, 1); else m.o.push(pick);
+  LS.set('marks', marks);
+  return i < 0;
+}
+
+/* 渲染完把标记画回去 */
+function applyMarks() {
+  const ctx = curReadItem();
+  document.querySelectorAll('.w[data-w]').forEach(el => {
+    const w = (el.dataset.w || '').toLowerCase();
+    if (vocab.some(v => v.word === w)) el.classList.add('saved');
+    if (ctx) {
+      const m = marks[ctx.key];
+      if (m && m.w.indexOf(w) >= 0) el.classList.add('ul');
+    }
+  });
+  if (!ctx) return;
+  const m = marks[ctx.key];
+  if (!m) return;
+  document.querySelectorAll('[data-pick]').forEach(el => {
+    if (m.o.indexOf(el.dataset.pick) >= 0) el.classList.add('strike');
   });
 }
 
@@ -285,7 +365,9 @@ function header() {
   const m = map[route] || map.home;
   $('#hdTitle').textContent = m[0];
   $('#hdSub').textContent = m[1];
-  $('#hdCount').textContent = examPassed() ? '考试已结束' : `距四级 ${daysToExam()} 天`;
+  const dn = daysToExam();
+  $('#hdCount').textContent = dn === null ? '未设考试日期'
+    : (examPassed() ? '考试已结束' : `距${examShort()} ${dn} 天`);
   $('#hdClock').textContent = `连续 ${streak()} 天`;
 }
 
@@ -295,11 +377,19 @@ function vHome() {
   const nRead = S.bank.types.reduce((a, t) => a + t.items.length, 0);
   return `
   <div class="card tight">
-    ${examPassed()
-      ? `<div class="ttl">你选的这场考试（${examInfo().date}）已经结束了</div>
-         <div class="meta" style="margin:6px 0 0">去「我的 → 我的考试场次」换成下一场吧。</div>`
-      : `<div class="ttl">距 ${examInfo().date} 四级考试还有 <span style="color:var(--brand)">${daysToExam()}</span> 天</div>
-         <div class="meta" style="margin:6px 0 0">${esc(examInfo().note)}。${EXAM_STRUCT}。</div>`}
+    ${(() => {
+      const cur = examInfo(), dn = daysToExam();
+      if (dn === null) {
+        return `<div class="ttl">还没设置考试</div>
+          <div class="meta" style="margin:6px 0 0">去「我的 → 我的考试」填一下考试名称和日期，这里就有倒计时了。</div>`;
+      }
+      if (examPassed()) {
+        return `<div class="ttl">${esc(cur.name)}（${cur.date}）已经结束了</div>
+          <div class="meta" style="margin:6px 0 0">去「我的 → 我的考试」改成你要考的下一场。</div>`;
+      }
+      return `<div class="ttl">距 ${esc(cur.name)} 还有 <span style="color:var(--brand)">${dn}</span> 天</div>
+        <div class="meta" style="margin:6px 0 0">${cur.date}${cur.site ? ' · ' + EXAM_STRUCT : ''}。</div>`;
+    })()}
   </div>
 
   <div class="stat-grid">
@@ -849,14 +939,6 @@ const MY_TYPE_META = {
   listen: { name: '听力听写', score: 0, unit: '句' },
 };
 
-/* 分节标题怎么写都能认出来（给使用者一个明确的对照表） */
-const MY_SECTION_HINTS = [
-  { match: '选词 / cloze', to: '选词填空' },
-  { match: '匹配 / matching', to: '长篇匹配' },
-  { match: '听 / listen', to: '听力听写' },
-  { match: '阅读 / careful / reading', to: '仔细阅读' },
-];
-
 function parseMyBankInput(text) {
   const s = String(text || '').trim();
   if (!s) return { ok: false, msg: '内容是空的' };
@@ -1081,9 +1163,10 @@ const HELP = {
     t: '阅读怎么用',
     items: [
       '三种题型，分值按真题：<b>仔细阅读 14.2 分/题</b>（最高，优先练）· 长篇匹配 7.1 分/题 · 选词填空 3.55 分/题。',
-      '选好答案点 <b>提交</b> 才判分，判完每题都有中文解析。',
-      '答错的自动进 <b>错题本</b>（在「我的」里看）。',
-      '正文里点<b>颜色可点的词</b>能立刻查释义并收藏；点同一个词或点空白处可以<b>取消标记</b>。',
+      '选好答案点 <b>提交</b> 才判分，判完每题都有中文解析。答错的自动进 <b>错题本</b>。',
+      '点正文里<b>颜色可点的词</b>：看释义、<b>加入生词本</b>、<b>划线</b>。点同一个词或点空白处取消标记。',
+      '已经收进生词本的词会带一条<b>虚线</b>，一眼看得出哪些查过了；划过的线会一直留着。',
+      '做题时点选项前面的<b>字母 A / B / C / D</b>，可以把这个选项<b>划掉</b>（不影响你作答），方便用排除法。',
       '如果导入过自己的题目，会带 <b>「我的题目」</b> 标签排在最前面。',
     ],
   },
@@ -1109,7 +1192,7 @@ const HELP = {
   me: {
     t: '这一页在说什么',
     items: [
-      '<b>我的考试场次</b>：四级一年两场（6 月 / 12 月），选你报名的那一场，首页倒计时跟着变；官方临时改期就用「自定义日期」。',
+      '<b>我的考试</b>：考试名称和日期都自己填，首页倒计时按这个算 —— 四级、六级、雅思、托福、高考、考研都行，站本身不限定考试类型。',
       '<b>我的题目</b>：这个站<b>不带任何版权资料</b>。你自己买的、老师发的资料，导进来只存在你这台设备的浏览器里，不上传、别人看不到。',
       '<b>关于与版权</b>：开源语料取自 Project Gutenberg（公有领域），原创题由作者撰写，<b>不含四级真题</b>。',
       '所有数据（错题 / 生词 / 打卡）都在<b>你自己浏览器本地</b>，清浏览器数据会丢。',
@@ -1136,6 +1219,7 @@ function render() {
     : route === 'me' ? vMe()
     : vHome();
   $('#view').innerHTML = (helpOpen ? vHelp() : '') + body;
+  applyMarks();                        // 把划线/排除线画回去
   if (route === 'listen') bindListen();
 }
 
@@ -1154,6 +1238,19 @@ document.addEventListener('click', e => {
   if (!t) return;
   const i = Math.min(stateOf(readType), t.items.length - 1);
   const key = readType + ':' + i;
+
+  // 点选项前面的字母 = 划掉这个选项（不影响作答），方便用排除法做题
+  const kEl = e.target.closest('.k');
+  if (kEl && kEl.closest('[data-pick]')) {
+    const pkEl = kEl.closest('[data-pick]');
+    const ctx = curReadItem();
+    if (ctx) {
+      const on = toggleOptMark(ctx.key, pkEl.dataset.pick);
+      pkEl.classList.toggle('strike', on);
+    }
+    return;
+  }
+
   if (LS.get('ans:' + key, null)) return;   // 已提交，只读
 
   const pk = e.target.closest('[data-pick]');
@@ -1325,28 +1422,15 @@ document.addEventListener('click', e => {
     }
     return;
   }
-  /* 我的考试场次 */
-  if (e.target.closest('[data-exam]')) {
-    const v = e.target.closest('[data-exam]').dataset.exam;
-    if (v === 'custom') {
-      const p = $('#exampanel');
-      if (p) p.style.display = 'block';
-      const d = $('#examdate');
-      if (d) d.focus();
-      return;
-    }
-    LS.set('exam', v === 'auto' ? null : { id: v });
-    render();
-    toast(v === 'auto' ? '已切回自动（最近一场）' : '已切换考试场次');
-    return;
-  }
+  /* 我的考试：名称 + 日期都可改（站不限定考试类型） */
   if (e.target.closest('[data-examsave]')) {
-    const d = $('#examdate');
-    const val = d ? d.value : '';
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) { toast('请先选一个日期'); return; }
-    LS.set('exam', { custom: true, date: val });
+    const nmEl = $('#examname'), dtEl = $('#examdate');
+    const nm = ((nmEl && nmEl.value) || '').trim() || '我的考试';
+    const dt = (dtEl && dtEl.value) || '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dt)) { toast('请先选一个考试日期'); return; }
+    LS.set('exam', { name: nm, date: dt });
     render();
-    toast('已把考试日期设为 ' + val);
+    toast('已保存：' + nm + ' · ' + dt);
     return;
   }
   if (e.target.closest('[data-clearvocab]')) {
