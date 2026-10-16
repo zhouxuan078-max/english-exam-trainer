@@ -3255,8 +3255,17 @@ async function handleImportFiles(files) {
       }
       if (!read.length && !audios.length) continue;
       if (!read.length) {
-        /* 只有音频没有卷子 —— 先存着，等卷子来了再配 */
-        await attachAudioFiles(audios, [], problems, notes);
+        /* 只有音频、没有试卷本体 —— 音频先存着，但要明说少了什么 */
+        problems.push('「' + paperNameOf(b, []) + '」这个文件夹里只找到音频，'
+          + '**没有试卷本体**（题目文件）—— 所以这一份没有导入。'
+          + '把试卷（Word / PDF / 文本）和音频放进同一个文件夹再拖一次即可。');
+        await attachAudioFiles(audios, [], problems, notes, null);
+        continue;
+      }
+      const onlyAns = read.every(x => isAnswerFile(x.f.name));
+      if (onlyAns) {
+        problems.push('「' + paperNameOf(b, read) + '」这个文件夹里只有答案/解析，'
+          + '没有试卷本体 —— 没有题目可导。把试卷本体也放进来再拖一次。');
         continue;
       }
       /* 分"试卷本体"和"答案解析" */
@@ -3266,6 +3275,9 @@ async function handleImportFiles(files) {
 
       const mainText = mains.map(x => x.text).join('\n\n');
       const name = paperNameOf(b, mains);
+      /* ⚠️ 这里**不能**走 importMyBank —— 它会按"文件名"先存一张卷子，
+         下面紧接着又会按"文件夹"存同一张，于是一份卷子变成两张。
+         文件夹导入统一走"解析 → 按文件夹键存"。 */
       const res = parseMyBankInput(mainText);
       if (!res.ok) {
         if (res.mismatch) {
@@ -3303,16 +3315,32 @@ async function handleImportFiles(files) {
       (res.notes || []).forEach(x => notes.push('「' + name + '」' + x));
       const issues = diagnoseTypes(res.types);
       issues.forEach(it => problems.push('「' + name + '」' + it.where + '：' + it.bad.join('；')));
-      const p = myPapers().find(x => x.id === paper.id);
+      const allP = myPapers();
+      const p = allP.find(x => x.id === paper.id);
       p.group = b.group;
+      p.hasAnswers = ansFiles.length > 0;
+      p.sources = read.map(x => x.f.name);
+      /* 一个文件夹里放了多套卷子本体（共用同一份听力）时，题目是**合起来**的 ——
+         听力题自然保留在里面，音频也是这一张卷子共用的。告诉使用者一声。 */
+      if (mains.length > 1) {
+        notes.push('「' + name + '」这个文件夹里有 ' + mains.length
+          + ' 份试卷文档，合成了一张卷子（听力音频共用）。');
+      }
+      if (!ansFiles.length) {
+        problems.push('「' + name + '」没有找到答案 / 解析 —— 做题时看不到正确答案。'
+          + '把答案解析也放进同一个文件夹再拖一次就能补上。');
+      }
 
-      /* 音频配到这张卷子上 */
-      if (audios.length) await attachAudioFiles(audios, [p], problems, notes);
+      savePapers(allP);                       // 名字/来源这些先落盘
+      /* 音频配到这张卷子上（改的是同一份 allP） */
+      if (audios.length) await attachAudioFiles(audios, [p], problems, notes, allP);
 
       /* 有听力题、却一段音频都没有 —— 专门提醒（题目照收） */
-      if (papersMissingAudio(myPapers().find(x => x.id === paper.id))) {
+      if (papersMissingAudio(p)) {
+        const donor = audioDonor(paper.id);
         problems.push('「' + name + '」有听力题，但这个文件夹里没找到音频 ——'
-          + '题目已经导进来了，补上音频就能听。');
+          + '题目已经导进来了，补上音频就能听。'
+          + (donor ? '（也可以用「' + donor.name + '」那一份：多套卷子常常共用一个听力音频）' : ''));
       }
       made++;
     } catch (e) {
@@ -3336,8 +3364,11 @@ async function handleImportFiles(files) {
 
 /* 音频：先存进 IndexedDB，再按"同组 / 名字对得上"挂到卷子上。
    挂不上的进待配池（在「我的题目」里能手动挑一张卷子配上去）。 */
-async function attachAudioFiles(files, madePapers, problems, notes) {
-  const all = myPapers();
+async function attachAudioFiles(files, madePapers, problems, notes, allList) {
+  /* ⚠️ 必须让调用方把"当前这一份列表"传进来。
+     踩过：这里自己 myPapers() 重新读一份，改的是**副本**，
+     最后写回存储时又被旧数据覆盖 —— 表现是"音频明明配上了却没挂上"。 */
+  const all = allList || myPapers();
   const pool = pendingAudio();
   for (const f of files) {
     const g = groupOf(f);
@@ -3394,25 +3425,40 @@ function pendingAudio() { return LS.get(pendAudioKey(), []) || []; }
    ========================================================================== */
 function idbOpen() {
   return new Promise((res, rej) => {
+    /* ⚠️ 一定要有超时。
+       踩过：在某些环境（file:// 下的浏览器、隐私模式）indexedDB.open
+       既不触发 onsuccess 也不触发 onerror —— 直接卡住。而我们是 await 它的，
+       结果**整个导入流程卡死**，界面停在"正在读…"再也不动。
+       宁可超时报"存不住"，也不能让界面卡住。 */
+    let done = false;
+    const finish = (fn, v) => { if (!done) { done = true; clearTimeout(tm); fn(v); } };
+    const tm = setTimeout(() => finish(rej, new Error('本地数据库没响应（超时）')), 4000);
     try {
-      if (typeof indexedDB === 'undefined') return rej(new Error('这个环境没有 IndexedDB'));
+      if (typeof indexedDB === 'undefined') { finish(rej, new Error('这个环境没有 IndexedDB')); return; }
       const rq = indexedDB.open('cet4lab', 1);
       rq.onupgradeneeded = () => {
         const db = rq.result;
         if (!db.objectStoreNames.contains('audio')) db.createObjectStore('audio');
       };
-      rq.onsuccess = () => res(rq.result);
-      rq.onerror = () => rej(rq.error || new Error('打不开本地数据库'));
-    } catch (e) { rej(e); }
+      rq.onsuccess = () => finish(res, rq.result);
+      rq.onerror = () => finish(rej, rq.error || new Error('打不开本地数据库'));
+      rq.onblocked = () => finish(rej, new Error('本地数据库被别的窗口占着'));
+    } catch (e) { finish(rej, e); }
   });
 }
 async function idbPut(key, blob) {
   const db = await idbOpen();
   return new Promise((res, rej) => {
-    const tx = db.transaction('audio', 'readwrite');
-    tx.objectStore('audio').put(blob, key);
-    tx.oncomplete = () => res(true);
-    tx.onerror = () => rej(tx.error);
+    let done = false;
+    const finish = (fn, v) => { if (!done) { done = true; clearTimeout(tm); fn(v); } };
+    const tm = setTimeout(() => finish(rej, new Error('写本地数据库超时')), 8000);
+    try {
+      const tx = db.transaction('audio', 'readwrite');
+      tx.objectStore('audio').put(blob, key);
+      tx.oncomplete = () => finish(res, true);
+      tx.onerror = () => finish(rej, tx.error);
+      tx.onabort = () => finish(rej, tx.error || new Error('写入被中止（多半是空间不够）'));
+    } catch (e) { finish(rej, e); }
   });
 }
 async function idbGet(key) {
@@ -3745,6 +3791,11 @@ function paperScoreHtml(p) {
   return out.length ? `<div class="meta" style="margin-top:2px">${out.join('　')}</div>` : '';
 }
 /* 有听力题却一份音频都没配 —— 题目照收，但要说一声 */
+/* 本考试里有没有别的卷子带着音频 —— 多套卷子常常共用一个听力音频，
+   所以缺音频时可以直接借那一份 */
+function audioDonor(exceptId) {
+  return myPapers().find(x => x.id !== exceptId && (x.audio || []).length) || null;
+}
 function papersMissingAudio(p) {
   const hasListen = (p.types || []).some(t => t.type === 'listening');
   return hasListen && !(p.audio || []).length;
@@ -3767,6 +3818,8 @@ function papersListHtml() {
       return m.name + ' ' + (t.items || []).length + m.unit;
     }).join(' · ');
     const units = (p.types || []).reduce((a, t) => a + unitCountOf(t.type, t.items), 0);
+    const hasListen = (p.types || []).some(t => t.type === 'listening');
+    const donor = papersMissingAudio(p) ? audioDonor(p.id) : null;
     h += `<div class="paper${on ? ' on' : ''}">
       <div class="row" style="margin:0;gap:6px;align-items:center">
         <input class="papername" data-paperrename="${p.id}" value="${esc(p.name)}"
@@ -3776,13 +3829,21 @@ function papersListHtml() {
       </div>
       <div class="meta" style="margin:6px 0 0">${esc(stat) || '（没有题目）'} · 共 ${units} ${scoreUnit('careful')}</div>
       ${paperScoreHtml(p)}
-      ${papersMissingAudio(p) ? `<div class="meta" style="margin-top:4px;color:var(--warn)">
-        这份卷子有听力题，但没配上音频 —— 题目能照常练，只是听不到声音。</div>` : ''}
-      ${(p.audio || []).length ? `<div class="meta" style="margin-top:2px">
-        配上音频 ${p.audio.length} 段：${esc(p.audio.map(a => a.name).join('、'))}</div>` : ''}
+      ${(p.sources || []).length > 1 ? `<div class="meta" style="margin-top:2px">
+        由 ${p.sources.length} 份文档合成：${esc(p.sources.join('、'))}</div>` : ''}
+      ${hasListen ? ((p.audio || []).length
+        ? `<div class="meta" style="margin-top:2px">听力音频：${esc(p.audio.map(a => a.name).join('、'))}（这份卷子共用）</div>`
+        : `<div class="meta" style="margin-top:4px;color:var(--warn)">
+            ⚠ 有听力题，但没配上音频 —— 题目能照常练，只是听不到声音。</div>`) : ''}
+      ${p.hasAnswers
+        ? `<div class="meta" style="margin-top:2px">答案 / 解析：已合并</div>`
+        : `<div class="meta" style="margin-top:4px;color:var(--warn)">
+            ⚠ 没有答案 / 解析 —— 做题时看不到正确答案。</div>`}
       <div class="row" style="margin:8px 0 0;gap:6px">
         <button class="btn ${on ? 'ghost' : ''} sm" data-paperuse="${p.id}">${
           on ? '改回全部一起练' : '只练这一张'}</button>
+        ${donor ? `<button class="btn ghost sm" data-paperborrow="${p.id}">用「${
+          esc(donor.name)}」的音频</button>` : ''}
         <button class="btn ghost sm" data-paperdel="${p.id}">删掉</button>
       </div>
     </div>`;
@@ -4432,6 +4493,26 @@ document.addEventListener('click', e => {
     setActivePaper(activePaperId() === id ? '' : id);
     const p = activePaper();
     toast(p ? '只练「' + p.name + '」' : '改回全部一起练');
+    return;
+  }
+  /* 借音频：多套卷子常常共用同一段听力录音 —— 直接引用同一份，不复制内容 */
+  if (e.target.closest('[data-paperborrow]')) {
+    const id = e.target.closest('[data-paperborrow]').dataset.paperborrow;
+    const list = myPapers();
+    const p = list.find(x => x.id === id);
+    const d = audioDonor(id);
+    if (p && d) {
+      p.audio = (p.audio || []).concat(d.audio.map(a => ({
+        id: a.id, name: a.name, size: a.size, from: d.name,
+      })));
+      const ids = p.audio.map(a => a.id);
+      (p.types || []).forEach(t => {
+        if (t.type !== 'listening') return;
+        (t.items || []).forEach((it, k) => { it.audio = ids[Math.min(k, ids.length - 1)]; });
+      });
+      savePapers(list); rebuildBank(); render();
+      toast('已用「' + d.name + '」的音频');
+    }
     return;
   }
   if (e.target.closest('[data-paperdel]')) {
