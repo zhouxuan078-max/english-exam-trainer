@@ -1355,16 +1355,21 @@ function vItem(t, i) {
     ${srcLine(it)}`;
 
   if (t.type === 'careful' || CHOICE_TYPES.indexOf(t.type) >= 0) {
-    // 听力：先播放，答完才给原文
-    if (it.audio || it.script) {
-      h += `<div class="audio-card" style="padding:18px 12px 14px">
-        <button class="bigbtn" id="playBtn" data-playq="1">▶</button>
-        <div class="meta" style="margin:0;text-align:center">${
-          it.audio ? '点一下播放录音' : '没有配音频，点一下用浏览器朗读原文'}</div>
-      </div>`;
-    } else {
-      h += `<div class="meta" style="margin:0 0 6px;color:var(--warn)">
-        这道听力题没有配音频，也没有原文 —— 只能自己做（声音和原文都缺）。</div>`;
+    /* 播放条**只给听力题**。
+       ⚠️ 踩过：这段原来写在"是不是选择题"那一支里，而仔细阅读也走那一支 ——
+          于是每篇阅读底下都挂一句"这道听力题没有配音频"，看着像坏了。
+          判据要用**题型**，不是"有没有选项"。 */
+    if (t.type === 'listening' || t.type === 'listen') {
+      if (it.audio || it.script) {
+        h += `<div class="audio-card" style="padding:18px 12px 14px">
+          <button class="bigbtn" id="playBtn" data-playq="1">▶</button>
+          <div class="meta" style="margin:0;text-align:center">${
+            it.audio ? '点一下播放录音' : '没有配音频，点一下用浏览器朗读原文'}</div>
+        </div>`;
+      } else {
+        h += `<div class="meta" style="margin:0 0 6px;color:var(--warn)">
+          这道听力题没有配音频，也没有原文 —— 只能自己做（声音和原文都缺）。</div>`;
+      }
     }
     const paras = [].concat(it.passage || []);
     if (paras.length) {
@@ -1886,7 +1891,15 @@ function savePapers(list) {
   LS.set(papersKey(), { v: 2, list: list });
 }
 /* 当前练的是哪一张；'' 表示"全部一起练" */
-function activePaperId() { return LS.get(activePaperKey(), '') || ''; }
+/* 现在**必须选中一张** —— 使用者要的是"导入后自己选练哪张"，
+   不再有"全部一起练"这个口径。没选、或者选的那张被删了，就落到第一张。 */
+function activePaperId() {
+  const id = LS.get(activePaperKey(), '') || '';
+  const all = myPapers();
+  if (!all.length) return '';
+  if (id && all.some(p => p.id === id)) return id;
+  return all[0].id;
+}
 function activePaper() {
   const id = activePaperId();
   if (!id) return null;
@@ -1901,9 +1914,8 @@ function setActivePaper(id) {
 /* 当前要练的那些试卷：选了某一张就只算它，没选就算全部。
    ⚠️ 进度、统分、题库**全都**跟着这个走 —— 这就是"选择我的题目"。 */
 function currentPapers() {
-  const all = myPapers();
   const one = activePaper();
-  return one ? [one] : all;
+  return one ? [one] : [];
 }
 /* 当前试卷的题目，按题型汇总（listen 单独走 S.listen） */
 function myBankTypes() {
@@ -2382,9 +2394,16 @@ function looseQuestions(lines) {
     // 空位编号被排成独立一行（就一个 "26"）—— 选词填空的正文常这样
     const bm = /^(\d{1,3})$/.exec(t);
     if (bm) blanks.push(+bm[1]);
+    // ⚠️ 空位编号在真题里是连号（26,27,28…）。正文里别的孤立数字不是空位 ——
+    //    后面跳号就停，否则会多算空位（"词库里的词不够填这些空"就是这么来的）。
+  });
+  const bseq = [];
+  blanks.forEach(n => {
+    if (!bseq.length) bseq.push(n);
+    else if (n === bseq[bseq.length - 1] + 1) bseq.push(n);
   });
   return { passage: passage, questions: qs.filter(x => x.q || x.options.length),
-           bankCount: bankCount, paraCount: paraCount, blanks: blanks };
+           bankCount: bankCount, paraCount: paraCount, blanks: bseq };
 }
 
 /* Part 里面还有 Section A/B/C —— 这三个往往就是三种不同的题型
@@ -2491,7 +2510,17 @@ function parseLooseBank(text) {
       const inline = (it.passage[0].match(/\{\{(\d{1,3})\}\}/g) || []);
       inline.forEach(x => { it.answers[+x.replace(/\D/g, '')] = ''; });
     } else if (type === 'matching') {
-      it.passage = [b.passage.join('\n')];
+      /* ⚠️ 匹配题的字段名是 **paragraphs**（[{letter,text}]），不是 passage。
+         之前写错了，页面就报"没有段落正文"。另外 Word 会把一段折成好几行，
+         要接回同一段里。 */
+      const paras = [];
+      b.passage.forEach(line => {
+        const t2 = line.trim();
+        const m2 = /^([A-O])\s*[)）、.．]\s*(.*)$/.exec(t2);
+        if (m2) { paras.push({ letter: m2[1], text: m2[2] }); return; }
+        if (paras.length && t2) paras[paras.length - 1].text += ' ' + t2;
+      });
+      it.paragraphs = paras;
       it.statements = b.questions.map(q => ({ s: q.q, answer: '' }));
     } else if (type === 'write' || type === 'translate' || type === 'speak') {
       it.material = (b.passage.join('\n') + '\n' + b.questions.map(q => q.q).join('\n')).trim();
@@ -3371,6 +3400,20 @@ async function readOneImport(f, tag, problems, notes) {
   return null;
 }
 
+/* 系统/Office 生成的杂物文件，不是使用者的素材，直接跳过。
+   ⚠️ 踩过：Word 会在同目录放一个隐藏的锁定文件 `~$答案解析.docx`（162 字节）。
+      拖文件夹时会把它一起带进来，读它必然失败，于是报
+      "这个 Office 文件我打不开（可能是加密的…）" —— 看着像功能坏了。 */
+function isJunkFile(name) {
+  const n = String(name || '');
+  const base = n.replace(/^.*[\\/]/, '');
+  return /^~\$/.test(base)                 // Office 锁定文件 ~$xxx.docx
+    || /^\._/.test(base)                   // macOS 资源叉 ._xxx
+    || /^\./.test(base)                    // 隐藏文件
+    || /(^|[\\/])(Thumbs\.db|desktop\.ini|\.DS_Store)$/i.test(n)
+    || /\.(tmp|temp|bak|crdownload|part)$/i.test(base);
+}
+
 /* 文件名看着像"答案 / 解析"吗 */
 function isAnswerFile(name) {
   return /答案|解析|answer|ans\b|key|solution|参考/i.test(String(name || ''));
@@ -3480,6 +3523,7 @@ async function handleImportFiles(files) {
      没放在文件夹里的散文件，就一个文件算一张试卷。 */
   const buckets = [];
   list.forEach(f => {
+    if (isJunkFile(f.name)) return;          // Word 锁定文件之类的杂物，直接跳过
     const g = groupOf(f);
     const key = g || ('\u0001' + f.name);
     let b = buckets.find(x => x.key === key);
@@ -3487,7 +3531,7 @@ async function handleImportFiles(files) {
     b.files.push(f);
   });
 
-  let made = 0;
+  let made = 0, lastPaperId = '';
   for (let bi = 0; bi < buckets.length; bi++) {
     const b = buckets[bi];
     const tag = buckets.length > 1 ? '（' + (bi + 1) + '/' + buckets.length + '）' : '';
@@ -3552,7 +3596,7 @@ async function handleImportFiles(files) {
         }
       }
 
-      const paper = savePaper(b.key, name, res.types, {
+      const paper = savePaper(b.key, name, res.types, {   // eslint-disable-line
         marks: parseImportMarks(mainText, res.types),
         audio: [],
       });
@@ -3579,6 +3623,7 @@ async function handleImportFiles(files) {
           + '把答案解析也放进同一个文件夹再拖一次就能补上。');
       }
 
+      lastPaperId = paper.id;
       savePapers(allP);                       // 名字/来源这些先落盘
       /* 音频配到这张卷子上（改的是同一份 allP） */
       if (audios.length) await attachAudioFiles(audios, [p], problems, notes, allP);
@@ -3597,6 +3642,9 @@ async function handleImportFiles(files) {
   }
   importNote('');
   savePapers(myPapers());
+  /* 导完就把"正在练"切到刚导进来的那张 —— 不然导完还停在旧卷子上，
+     使用者会以为没导进来。 */
+  if (lastPaperId) LS.set(activePaperKey(), lastPaperId);
   rebuildBank();
 
   importReport = {
@@ -4031,6 +4079,7 @@ function importMyBank(text, srcName, extra) {
   if (!key) key = textKey(text);
   const p = savePaper(key, String(key).replace(/\.[^.]+$/, ''), r.types,
     { marks: ex.marks || parseImportMarks(text, r.types), audio: ex.audio });
+  LS.set(activePaperKey(), p.id);      // 导完就切到刚导的这张
   rebuildBank();
   if (!ex.__silent) render();
   return { ok: true, n: total,
@@ -4080,8 +4129,7 @@ function papersListHtml() {
   }
   const cur = activePaperId();
   let h = `<div class="meta" style="margin-bottom:8px">
-    「${esc(examShort())}」共 <b>${list.length}</b> 张卷子 · `
-    + (cur ? '现在只练选中的那一张' : '<b>全部一起练</b>（点一张就只练它）') + '</div>';
+    「${esc(examShort())}」共 <b>${list.length}</b> 张卷子 · 点「练」换一张</div>`;
   list.forEach(p => {
     const on = cur === p.id;
     const stat = (p.types || []).map(t => {
@@ -4111,8 +4159,7 @@ function papersListHtml() {
         : `<div class="meta" style="margin-top:4px;color:var(--warn)">
             ⚠ 没有答案 / 解析 —— 做题时看不到正确答案。</div>`}
       <div class="row" style="margin:8px 0 0;gap:6px">
-        <button class="btn ${on ? 'ghost' : ''} sm" data-paperuse="${p.id}">${
-          on ? '改回全部一起练' : '只练这一张'}</button>
+        ${on ? '' : `<button class="btn" data-paperuse="${p.id}">练这一张</button>`}
         ${donor ? `<button class="btn ghost sm" data-paperborrow="${p.id}">用「${
           esc(donor.name)}」的音频</button>` : ''}
         <button class="btn ghost sm" data-paperdel="${p.id}">删掉</button>
@@ -4824,9 +4871,9 @@ document.addEventListener('click', e => {
   /* 只练这一张 / 改回全部一起练 */
   if (e.target.closest('[data-paperuse]')) {
     const id = e.target.closest('[data-paperuse]').dataset.paperuse;
-    setActivePaper(activePaperId() === id ? '' : id);
+    setActivePaper(id);
     const p = activePaper();
-    toast(p ? '只练「' + p.name + '」' : '改回全部一起练');
+    toast(p ? '现在练「' + p.name + '」' : '');
     return;
   }
   /* 借音频：多套卷子常常共用同一段听力录音 —— 直接引用同一份，不复制内容 */
