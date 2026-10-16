@@ -3866,69 +3866,21 @@ function importNote(msg) {
 function importReportHtml() {
   if (!importReport) return '';
   const r = importReport;
-  let h = '<div class="card tight" style="margin-top:10px">';
-  if (r.mismatch) {
-    /* 「这场考试不考的题型」—— 直接拒绝，但把话说透：
-       是哪个题型、为什么、哪个考试考它、以及该怎么办。 */
-    h += `<div class="ttl" style="color:var(--bad)">这些不是「${esc(examShort())}」的题型，没有导入</div>`;
-    r.mismatch.forEach(m => {
-      h += `<div class="meta" style="margin-top:6px">
-        <b>${esc(m.name)}</b>（${m.n} ${esc((QTYPES[m.type] || {}).unit || '篇')}）`;
-      h += m.exams.length
-        ? ` —— ${esc(examShort())}不考它，考它的是：<b>${esc(m.exams.join('、'))}</b>`
-        : ' —— 本站目前没有哪个考试考它';
-      h += `</div>`;
-    });
-    h += `<div class="meta" style="margin-top:8px">把这几段删掉再导一次就行；`
-      + `或者切到上面提到的考试，再导这一部分。</div>`;
-    if (r.unknown && r.unknown.length) {
-      h += `<div class="meta" style="margin-top:6px">另有分节没认出来：`
-        + esc(r.unknown.join('、')) + `。标成 <code>=== 题型名 ===</code> 试试。</div>`;
-    }
-  } else if (r.ok) {
-    h += `<div class="ttl" style="color:var(--ok)">已导入到「${esc(examShort())}」</div>`;
-    h += `<div class="meta" style="margin-top:6px">${esc(r.types)}`;
-    if (typeof r.added === 'number') {
-      h += ` —— 新加 <b>${r.added}</b> 条`
-        + (r.dup ? `，${r.dup} 条和已有的重复，没重复导入` : '');
-    }
-    h += `</div>`;
-    h += `<div class="meta" style="margin-top:4px">导入是往后<b>加</b>的，不会把之前导的冲掉。</div>`;
-    if (r.guessed && r.guessed.length) {
-      h += `<div class="meta" style="margin-top:6px">没写分节标题，我按内容判成了 `
-        + esc(r.guessed.join('、')) + `。</div>`;
-    }
-    if (r.notes && r.notes.length) {
-      r.notes.forEach(x => { h += `<div class="meta" style="margin-top:6px">${esc(x)}</div>`; });
-    }
-    if (r.unknown && r.unknown.length) {
-      h += `<div class="meta" style="margin-top:6px">有分节没认出来：<b>`
-        + esc(r.unknown.join('、')) + `</b>。标成 <code>=== 题型名 ===</code> 试试。</div>`;
-    }
-    if (r.issues && r.issues.length) {
-      h += `<div class="meta" style="margin-top:8px;color:var(--warn)">`
-        + `有 ${r.issues.length} 处内容不全，做题时会缺东西：</div>`;
-      r.issues.slice(0, 20).forEach(it => {
-        h += `<div class="meta" style="margin-left:2px">· ${esc(it.where)}：${esc(it.bad.join('；'))}</div>`;
-      });
-      if (r.issues.length > 20) {
-        h += `<div class="meta">…还有 ${r.issues.length - 20} 处</div>`;
-      }
-    } else {
-      h += `<div class="meta" style="margin-top:6px">没有发现缺内容的地方。</div>`;
-    }
-  } else {
-    h += `<div class="ttl" style="color:var(--bad)">没能导入</div>`;
-    if (r.msg) h += `<div class="meta" style="margin-top:6px">${esc(r.msg)}</div>`;
-    if (r.unknown && r.unknown.length) {
-      h += `<div class="meta" style="margin-top:6px">没认出来的分节：<b>`
-        + esc(r.unknown.join('、')) + `</b></div>`;
-    }
-  }
-  (r.problems || []).forEach(p => {
-    h += `<div class="meta" style="margin-top:6px;color:var(--warn)">· ${esc(p)}</div>`;
-  });
-  return h + '</div>';
+  const det = [];
+  (r.problems || []).forEach(x => det.push('· ' + x));
+  if (!det.length) (r.notes || []).forEach(x => det.push('· ' + x));
+  if (r.unknown && r.unknown.length) det.push('· 有分节没认出来：' + r.unknown.join('、'));
+  const tip = esc(det.join('\n')).replace(/"/g, '&quot;');
+  let text, color = 'var(--ok)';
+  if (r.ok) {
+    text = '已导入 ' + (r.made || r.papers || 1) + ' 张卷子';
+    if ((r.problems || []).length) { color='var(--warn)'; text += ' · ⚠ ' + r.problems.length + ' 处小问题'; }
+    else if ((r.notes || []).length) text += ' · ' + r.notes.length + ' 条说明';
+  } else { color='var(--bad)'; text = r.msg || '没能导入'; }
+  return `<div class="card tight" style="margin-top:10px">
+    <div style="color:${color};cursor:help" title="${tip || '没有别的问题'}">${esc(text)}${
+      det.length ? '<span style="color:var(--fg3);font-weight:400"> （鼠标放上来）</span>' : ''}</div>
+  </div>`;
 }
 
 function parseMyBankInput(text) {
@@ -4001,8 +3953,14 @@ function parseMyBankInput(text) {
   }
   /* ⚠️ 只挡"这场考试不考的题型" —— **不**因为少了哪些题型就报错。
      用户明确说过：只导入一部分（比如这次只加阅读、没加听力）是正常用法。 */
-  if (bad.length) return { ok: false, mismatch: bad, unknown: parsed.unknown };
+  /* ⚠️ 原来这里会把"这场考试不考的题型"整份退回。用户要求去掉这个限制 ——
+     照样收下，只在说明里提一句该切到哪场考试。 */
+  const badNote = bad.length
+    ? '其中 ' + bad.map(x => x.name + '（' + examShort() + '不考它）').join('、')
+      + ' 也收下了 —— 要练它请切到对应的考试。'
+    : '';
   const notes = (parsed.notes || []).slice();
+  if (badNote) notes.unshift(badNote);
   if (usedLoose) {
     notes.unshift('这份文件没有 === 分节标题 ===，我按"题号 + 选项"抓的题：'
       + (parsed.guessed || []).join('、') + '。');
@@ -4048,10 +4006,30 @@ function rebuildBank() {
    key  = 去重键（文件夹路径，或散文件的文件名）—— 同一个 key 再导一次就是**更新**那张卷子
    name = 显示名，默认取文件夹名/文件名，使用者之后可以在页面里改
    ⚠️ 使用者改过的名字要留住，别被文件名覆盖回去。 */
+/* 一份题库的内容指纹：判断"同名文件是不是同一份内容" */
+function bankFingerprint(types) {
+  const t = JSON.stringify(types || []).replace(/"id":"[^"]*",?/g, '');
+  let h = 5381;
+  for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+
 function savePaper(key, name, types, extra) {
   const list = myPapers();
   const ex = extra || {};
+  const fp = bankFingerprint(types);
   let p = list.find(x => x.src === key);
+  /* ⚠️ **同名但内容不同 → 另存一张，绝不覆盖**。
+     踩过：两次导入的文件都叫「试卷.docx」，第二份把第一份直接盖掉了 ——
+     表现出来就是"后导入的把前面导入的覆盖了"。 */
+  if (p && p.fp && p.fp !== fp) {
+    const base = String(name || '未命名试卷');
+    let nm = base;
+    for (let k = 2; list.some(x => x.name === nm); k++) nm = base + '（' + k + '）';
+    name = nm;
+    key = key + '#' + fp;
+    p = null;
+  }
   if (p) {
     p.types = types;
     p.marks = ex.marks || {};
@@ -4059,7 +4037,7 @@ function savePaper(key, name, types, extra) {
     p = {
       id: 'p' + Date.now().toString(36) + '-' + (list.length + 1),
       name: String(name || '未命名试卷').slice(0, 60),
-      src: key, addedAt: today(),
+      src: key, addedAt: today(), fp: fp,
       types: types, marks: ex.marks || {}, audio: [],
     };
     list.push(p);
@@ -4214,7 +4192,6 @@ function papersListHtml() {
           + 'border-color:transparent">正在练</span>' : ''}
       </div>
       <div class="meta" style="margin:6px 0 0">${esc(stat) || '（没有题目）'} · 共 ${units} ${scoreUnit('careful')}</div>
-      ${paperScoreHtml(p)}
       ${(p.sources || []).length > 1 ? `<div class="meta" style="margin-top:2px">
         由 ${p.sources.length} 份文档合成：${esc(p.sources.join('、'))}</div>` : ''}
       ${hasListen ? ((p.audio || []).length
@@ -4280,18 +4257,7 @@ function vMe() {
         </div>
       </div>
 
-      <details class="fold" style="margin:8px 0">
-        <summary>它认得哪些写法</summary>
-        <div class="meta" style="margin:6px 0 4px">
-          分节标题决定这段归到哪一类，用 <code>=== 标题 ===</code> 包起来最保险。
-          十二个标题：仔细阅读 / 长篇匹配 / 选词填空 / 单项选择 / 判断题 /
-          听力理解 / 听力听写 / 数学 / 填空题 / 写作 / 翻译 / 口语。
-        </div>
-        <div class="meta">
-          一个标题都没写也能认：会按内容自己判型，判成什么会告诉你。
-          只导一部分也没关系 —— 只有「这场比赛根本不考的题型」才会被退回来。
-        </div>
-      </details>
+      
 
       <textarea id="mytext" rows="7" placeholder="也可以把文字直接粘贴在这里（手机相册长按图片就能「提取文字」）"
         style="width:100%;box-sizing:border-box;font-family:ui-monospace,Consolas,monospace;font-size:12px;padding:8px;border:1px solid var(--line);border-radius:8px">${importReport && importReport.fileText ? esc(importReport.fileText) : ''}</textarea>
@@ -4299,11 +4265,8 @@ function vMe() {
         <button class="btn" data-myimport="1">导入</button>
         <button class="btn ghost sm" data-myfmt="1">看格式示例</button>
       </div>
-      <pre id="myfmt" style="display:none;font-size:11px;line-height:1.55;background:var(--bg);padding:10px;border-radius:8px;overflow:auto;margin:0">${esc(MYFORMAT_DEMO)}</pre>
+      
       ${importReportHtml()}
-      <div class="meta" style="margin-top:8px">
-        ⚠ 只导入<b>你自己有权使用</b>的材料。这个站只是工具，不带内容。
-      </div>
     </div>
   </div>
 
