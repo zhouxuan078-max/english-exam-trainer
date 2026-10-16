@@ -2364,13 +2364,63 @@ function looseQuestions(lines) {
     if (/^\s*(?:Directions?|说明|注意)\s*[:：]/i.test(line)) return;   // 指令行丢掉
     if (!cur.options.length && line.trim()) cur.q += (cur.q ? ' ' : '') + line.trim();
   });
-  return { passage: passage, questions: qs.filter(x => x.q || x.options.length) };
+  /* 顺手统计两个"内容特征"，用来判断这一段到底是哪种题 ——
+     比标题可靠：Part 里面只有 Section A/B/C，标题上根本没有题型名。 */
+  let bankCount = 0, paraCount = 0;
+  const blanks = [];
+  lines.forEach(line => {
+    const t = line.trim();
+    /* 词库（选词填空）有两种排法，两种都得认：
+       ① 一行塞好几个：A) available B) deteriorating C) earned …
+       ② **一个词一行**：A) available / B) deteriorating / …（真题 PDF/Word 常这样）
+       判据：这一行只有 A)-O) 中的一个字母 + 一两个短词。 */
+    const opts = splitOptionsLine(t);
+    if (opts.length >= 6 && opts.every(o => o.split(/\s+/).length <= 2)) bankCount++;
+    else if (/^[A-O]\s*[)）、.．]\s*[A-Za-z][A-Za-z'\-]*(?:\s+[A-Za-z'\-]+)?\s*$/.test(t)) bankCount++;
+    // 长篇匹配的段落：以 A) 开头而且是一整段话
+    if (/^[A-O]\s*[)）、.．]\s*\S/.test(t) && t.length >= 60) paraCount++;
+    // 空位编号被排成独立一行（就一个 "26"）—— 选词填空的正文常这样
+    const bm = /^(\d{1,3})$/.exec(t);
+    if (bm) blanks.push(+bm[1]);
+  });
+  return { passage: passage, questions: qs.filter(x => x.q || x.options.length),
+           bankCount: bankCount, paraCount: paraCount, blanks: blanks };
+}
+
+/* Part 里面还有 Section A/B/C —— 这三个往往就是三种不同的题型
+   （选词填空 / 长篇匹配 / 仔细阅读）。不切开的话整块会被判成同一种题。 */
+function splitSubSections(lines) {
+  const re = /^\s*Section\s+([A-E])\s*$/i;
+  const out = [];
+  let cur = null;
+  lines.forEach(l => {
+    const m = re.exec(String(l).trim());
+    if (m) { cur = { name: 'Section ' + m[1].toUpperCase(), lines: [] }; out.push(cur); return; }
+    if (!cur) { cur = { name: '', lines: [] }; out.push(cur); }
+    cur.lines.push(l);
+  });
+  return out;
 }
 
 /* 这一段属于什么题型：先看标题，标题认不出来就按内容猜 */
-function looseTypeOf(headerName, block, examTypes) {
+function looseTypeOf(headerName, block, examTypes, hint) {
   const byName = headerName ? sectionTypeOf(headerName) : null;
-  if (byName && examTypes.indexOf(byName) >= 0) return byName;
+  const has = t => examTypes.indexOf(t) >= 0;
+  /* ⓪ 父块的名字也认不出来时，用"位置提示"：
+     四级/六级的 Part III Reading 固定是 Section A 选词填空 / B 长篇匹配 / C 仔细阅读。 */
+  if (hint && has(hint)) return hint;
+  /* ⓪′ 父块标题（"Listening Comprehension"）常常比子块的 "Section A" 更有信息 */
+  const byParent = hint === undefined && block.parentName
+    ? sectionTypeOf(block.parentName) : null;
+  if (!byName && byParent && has(byParent)) return byParent;
+  /* ① **内容特征优先于标题** —— 真题的 Part 里面只有 "Section A/B/C"，
+     标题上看不出题型；但内容一眼能认：
+       有词库行（A) word B) word…）+ 编号空位 → 选词填空
+       有多个长段落（A) 长文…）+ 编号句子        → 长篇匹配 */
+  if (block.bankCount >= 1 && has('cloze')) return 'cloze';
+  if (block.blanks.length >= 5 && has('cloze')) return 'cloze';
+  if (block.paraCount >= 4 && has('matching')) return 'matching';
+  if (byName && has(byName)) return byName;
   const qs = block.questions;
   const nOpt = qs.length ? Math.max.apply(null, qs.map(q => (q.options || []).length)) : 0;
   const longText = block.passage.join(' ').length > 200;
@@ -2392,10 +2442,36 @@ function parseLooseBank(text) {
   const blocks = _splitSections(text);
   const out = {};
   const notes = [];
-  blocks.forEach((sec, bi) => {
+  /* Part 里带 Section A/B/C 的，先切成子块 —— 它们往往是三种不同题型 */
+  const units = [];
+  blocks.forEach(sec => {
+    const subs = splitSubSections(sec.lines);
+    if (subs.length > 1) {
+      subs.forEach(sub => units.push({
+        name: sub.name || sec.name,
+        parent: sec.name,
+        lines: sub.lines.concat(sec.name ? [] : []),
+      }));
+    } else {
+      units.push({ name: sec.name, parent: '', lines: sec.lines });
+    }
+  });
+  units.forEach((sec, bi) => {
     const b = looseQuestions(sec.lines);
-    if (!b.questions.length) return;
-    const type = looseTypeOf(sec.name, b, examTypes);
+    if (!b.questions.length && !b.bankCount && !b.blanks.length) return;
+    /* 子块自己没有题型名时，先看父块的名字（"Listening Comprehension" →
+       听力理解）；阅读那三个 Section 再按固定顺序兜底（A 选词 / B 匹配 / C 仔细）。 */
+    let hint;
+    const subNo = /^Section\s*([A-E])$/i.exec(sec.name);
+    const subType = sectionTypeOf(sec.name);
+    if (subNo && !subType) {
+      const pType = sectionTypeOf(sec.parent);
+      if (pType === 'careful') {                  // 阅读那个大 Part
+        hint = { A: 'cloze', B: 'matching', C: 'careful' }[subNo[1].toUpperCase()];
+      }
+    }
+    b.parentName = sec.parent || '';
+    const type = looseTypeOf(sec.name, b, examTypes, hint);
     if (!type) return;
     const it = {
       id: 'L' + bi + '-' + Date.now().toString(36),
@@ -2405,9 +2481,15 @@ function parseLooseBank(text) {
     if (type === 'cloze' || type === 'gap') {
       /* 选词/填空：正文里是 {{n}} 或 n. ______ 的空位。
          答案多半在"答案解析"那一份里，会由 applyAnswerKey 补上。 */
-      it.passage = [b.passage.join('\n')];
+      /* ⚠️ 真题里空位编号常被 Word 排成**独立一行**（就一个 "26"），
+         并回正文里更好读；顺便把段落接起来。 */
+      it.passage = [b.passage.join('\n').replace(/\n\s*(\d{1,3})\s*\n/g, ' {{$1}} ')];
       it.answers = {};
+      /* 空位编号来自"单独成行的 26 / 27…"，也可能来自 {{n}}；两者都收 */
+      b.blanks.forEach(n => { it.answers[n] = ''; });
       b.questions.forEach(q => { it.answers[q.n] = ''; });
+      const inline = (it.passage[0].match(/\{\{(\d{1,3})\}\}/g) || []);
+      inline.forEach(x => { it.answers[+x.replace(/\D/g, '')] = ''; });
     } else if (type === 'matching') {
       it.passage = [b.passage.join('\n')];
       it.statements = b.questions.map(q => ({ s: q.q, answer: '' }));
