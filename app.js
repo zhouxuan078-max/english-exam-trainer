@@ -2521,7 +2521,7 @@ function parseLooseBank(text) {
         if (paras.length && t2) paras[paras.length - 1].text += ' ' + t2;
       });
       it.paragraphs = paras;
-      it.statements = b.questions.map(q => ({ s: q.q, answer: '' }));
+      it.statements = b.questions.map(q => ({ s: q.q, answer: '', n: q.n }));
     } else if (type === 'write' || type === 'translate' || type === 'speak') {
       it.material = (b.passage.join('\n') + '\n' + b.questions.map(q => q.q).join('\n')).trim();
     } else {
@@ -3462,8 +3462,32 @@ function applyAnswerKey(types, text) {
       });
     });
   } catch (e) { /* 解析不了就当纯答案串处理 */ }
-  /* ② 纯答案串：把选择题按顺序填 */
-  const seq = parseAnswerSequence(text);
+  /* ② 按**题号**贴（解析文档那种 —— 【答案】 离题号很远，只能按号找） */
+  const byNum = parseNumberedAnswers(text);
+  if (Object.keys(byNum).length) {
+    types.forEach(t => (t.items || []).forEach(it => {
+      (it.questions || []).forEach(q => {
+        if (typeof q.answer === 'number' && q.answer >= 0) return;
+        if (q.n == null) return;
+        const L = byNum[q.n];
+        if (!L) return;
+        const idx = 'ABCDEFGHIJKLMNO'.indexOf(L);
+        if (idx < 0) return;
+        if ((q.options || []).length && idx >= q.options.length) return;
+        q.answer = idx; filled++;
+      });
+      (it.statements || []).forEach(s2 => {
+        if (s2.answer) return;
+        const L = byNum[s2.n];
+        if (!L) return;
+        s2.answer = L; filled++;
+      });
+    }));
+  }
+  /* ③ 纯答案串：把选择题按顺序填。
+     ⚠️ 只有在②（按题号）**一条都没取到**时才走这里 ——
+        两套混着用会互相污染（②填 C、③又按顺序覆盖成 A）。 */
+  const seq = filled ? [] : parseAnswerSequence(text);
   if (seq.length) {
     const flat = [];
     types.forEach(t => (t.items || []).forEach(it => {
@@ -3485,6 +3509,33 @@ function applyAnswerKey(types, text) {
   return filled;
 }
 
+/* 从"答案解析"那种文档里按**题号**取答案。
+   ⚠️ 真题的解析文档长这样（懒笔记那种）：
+        1. A) 他的儿子曾用他的手机…   B) …   C) …   D) …
+        【答案】 C （细节题） His son had ordered food…
+        【定位】 …
+      也就是 **【答案】 离题号很远**，中间隔着一堆选项和解析文字。
+      按"同题型同顺序"去对齐根本对不上（踩过：只对上了第 1 题）。
+      所以这里往回找最近的题号，做成「题号 → 答案」的表，再按题号贴回去。 */
+function parseNumberedAnswers(text) {
+  const out = {};
+  const lines = String(text || '').replace(/\r\n?/g, '\n').split('\n');
+  const qn = /^\s*(\d{1,3})\s*[.、．)）]\s*\S/;
+  const an = /【答案】\s*([A-O])/;
+  let lastN = 0;
+  lines.forEach(line => {
+    const m = qn.exec(line);
+    /* ⚠️ 题号**允许回绕**，不要加"必须递增"的守卫。
+       真题解析的排法是：先把**全部英文题**列一遍（1…25），
+       再从头把**每个题的中文翻译 + 【答案】**列一遍（又是 1…25）。
+       加递增守卫的话，第二遍的 1…24 全被挡掉，答案会错误地堆到第 25 题上（踩过）。 */
+    if (m) lastN = +m[1];
+    const am = an.exec(line);
+    if (am && lastN) out[lastN] = am[1].toUpperCase();
+  });
+  return out;
+}
+
 /* 从纯答案文本里抽答案序号：认 "1-5 ABCDA" 和 "1. A / 1、A / 1:A" 两种 */
 function parseAnswerSequence(text) {
   const s = String(text || '').replace(/\r/g, '');
@@ -3498,7 +3549,10 @@ function parseAnswerSequence(text) {
     }
   }
   if (out.length) return out;
-  const re2 = /(?:^|[\s,，、;；])(\d{1,3})\s*[.、:：)）]\s*([A-Da-d])(?![A-Za-z])/g;
+  /* ⚠️ 必须排除 `1. A) 选项文字` 这种**选项行** ——
+     它的形状和"纯答案串 1. A"一模一样，不排除就会把每道题的
+     第一个选项当成答案（踩过：听力 1~24 全被填成 A）。 */
+  const re2 = /(?:^|[\s,，、;；])(\d{1,3})\s*[.、:：]\s*([A-Da-d])(?![A-Za-z)）])/g;
   while ((m = re2.exec(s))) out[+m[1]] = m[2].toUpperCase();
   return out;
 }
