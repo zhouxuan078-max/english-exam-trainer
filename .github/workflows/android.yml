@@ -109,7 +109,7 @@ jobs:
 
       # 构建日志在网页里，而「能打开浏览器翻日志」不该是排查的前提。
       # GitHub 的检查注解**不用登录就能读**，所以把关键几行直接摊成注解。
-      - name: 失败了就把关键几行摊成注解
+      - name: 失败了就把关键几段摊成注解
         if: failure()
         run: |
           L=/tmp/gradle.log
@@ -117,16 +117,45 @@ jobs:
             echo "::error::连 gradle 日志都没生成，说明挂在更早的步骤上"
             exit 0
           fi
-          {
-            grep -n -iE "(^|: )(FAILURE|error|e: )|What went wrong|Could not|Couldn't|Unsupported|No such|Exception|requires|not found|Execution failed" "$L" | head -n 28 || true
-            echo "---- 日志最后 15 行 ----"
-            tail -n 15 "$L"
-          } | head -n 45 | while IFS= read -r line; do
-            line=$(printf '%s' "$line" | tr -d '\r' | cut -c1-900)
-            [ -z "$line" ] && continue
-            line=$(printf '%s' "$line" | sed 's/%/%25/g')
-            echo "::error::$line"
-          done
+          # 整段整段地抓（What went wrong / Caused by / Try / 失败的 task），
+          # 因为报错原因常常在"下一行"，只抓含 error 的那一行是抓不到真凶的。
+          # 多行要转义成 %0A 才能塞进一条注解，否则注解在第一行就断了。
+          python3 - <<'PYEOF' || tail -n 20 "$L"
+          import re
+          lines = open('/tmp/gradle.log', encoding='utf-8', errors='replace').read().splitlines()
+          blocks = []
+          def add(title, body):
+              body = body.strip('\r\n ')
+              if body:
+                  blocks.append(title + '  ' + body)
+          for i, l in enumerate(lines):
+              s = l.strip()
+              if s.startswith('* Where:'):
+                  # 这一段是「哪个文件第几行」，最有价值的一条
+                  add('[Where]', '\n'.join(lines[i:i + 4]))
+              elif 'What went wrong' in l:
+                  add('[What went wrong]', '\n'.join(lines[i:i + 16]))
+              elif re.match(r'Caused by\b', s):
+                  add('[Caused by]', '\n'.join(lines[i:i + 4]))
+              elif s.startswith('* Try:'):
+                  add('[Try]', '\n'.join(lines[i:i + 5]))
+              elif 'Execution failed for task' in l:
+                  add('[Failed task]', '\n'.join(lines[i:i + 4]))
+              elif 'Could not' in l or 'Unsupported' in l or 'not found' in l:
+                  if ' at ' not in l:
+                      add('[线索]', l)
+          seen, out = set(), []
+          for b in blocks:
+              k = b[:120]
+              if k in seen:
+                  continue
+              seen.add(k)
+              b = b[:900].replace('%', '%25').replace('\r', '').replace('\n', '%0A')
+              out.append('::error::' + b)
+          print('\n'.join(out[:12]) or '::error::没抓到可读的报错，日志最后 20 行如下' ,
+                end='')
+          print('', end='\n')
+          PYEOF
           exit 0
 
       - name: 取出来并体检

@@ -1,5 +1,22 @@
 plugins { id 'com.android.application' }
 
+/* ⚠️ 版本号在 android{} **外面**先算好。
+   原来写成 `versionCode (project.findProperty('vc') ?: '1').toInteger()`
+   直接在 defaultConfig 里取值，CI 上报的是：
+
+     A problem occurred evaluating project ':app'.
+     Caused by: java.lang.IllegalArgumentException: Value is null
+
+   跟着 Gradle 的 DefaultConvention.configureExtension 一路下来 ——
+   就是在配置 android 这个 extension 的时候有个 null 递了进去。
+   取值这种事不该发生在一个正在被配置的 extension 里面：
+   先算出普通变量，再喂进去，链条上就没有 null 能钻的空子。
+
+   由 CI 传进来：-Pvc=<构建序号> -Pvn=1.<构建序号>
+   versionCode 必须是**只增不减**的，不然覆盖安装会被系统拒掉。 */
+def BUILD_NO = (project.findProperty('vc') ?: '1').toString().trim().toInteger()
+def BUILD_NAME = (project.findProperty('vn') ?: '1.0').toString().trim()
+
 android {
     namespace 'com.zhouxuan.englishtrainer'
     compileSdk 34
@@ -8,10 +25,8 @@ android {
         applicationId 'com.zhouxuan.englishtrainer'
         minSdk 26
         targetSdk 34
-        /* 由 CI 传进来：-Pvc=<构建序号> -Pvn=1.<构建序号>
-           versionCode 必须是**只增不减**的，不然覆盖安装会被系统拒掉。 */
-        versionCode (project.findProperty('vc') ?: '1').toInteger()
-        versionName (project.findProperty('vn') ?: '1.0')
+        versionCode BUILD_NO
+        versionName BUILD_NAME
     }
 
     signingConfigs {
@@ -27,7 +42,12 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            signingConfig signingConfigs.fixed
+            /* 用 getByName 而不是 signingConfigs.fixed：
+               后者是 Groovy 的动态属性查询，要在 extension 还没配完的时候
+               把 signingConfig 容器翻出来 —— 一旦拿到 null，
+               AGP 那边只会抛一句 IllegalArgumentException: Value is null，
+               看不出是哪儿。getByName 拿不到会直接报清楚"没有这个名字"。 */
+            signingConfig signingConfigs.getByName('fixed')
         }
         /* ⚠️ debug 也**不能**用安卓工具链自动生成的那把钥匙。
            在干净的构建机上，AGP 每次都会现造一把新的 debug.keystore，
@@ -35,7 +55,7 @@ android {
            必须先卸载旧的（答题记录、错题、打卡全跟着没）。
            固定成同一把钥匙，覆盖安装才是**升级**而不是重装。 */
         debug {
-            signingConfig signingConfigs.fixed
+            signingConfig signingConfigs.getByName('fixed')
         }
     }
 
