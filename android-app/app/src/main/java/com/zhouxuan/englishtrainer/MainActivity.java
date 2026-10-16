@@ -82,8 +82,12 @@ public class MainActivity extends Activity {
         st.setDisplayZoomControls(false);
         st.setMediaPlaybackRequiresUserGesture(false);   // 听力音频不用再点一次
         st.setJavaScriptCanOpenWindowsAutomatically(false);
-        st.setAllowFileAccess(false);
-        st.setAllowContentAccess(false);
+        st.setAllowFileAccess(false);        // 页面不经 file:// 读文件（本地资源走上面那个 https 假域名）
+        /* ⚠️ 这一条**必须**保持 true，别顺手"加固"成 false：
+           setAllowContentAccess(false) 会让「选文件导入」在 App 里彻底哑掉 ——
+           系统选择器照样弹得出来，但选完的那份文件递不进页面，
+           表现就是"点了文件、什么都没发生"。这是 WebView 的老行为。 */
+        st.setAllowContentAccess(true);
 
         final WebViewAssetLoader loader = new WebViewAssetLoader.Builder()
                 .setDomain("appassets.androidplatform.net")

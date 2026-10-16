@@ -54,6 +54,18 @@
 浏览器里 `window.AndroidShell` 是 `undefined`，那些分支一个都不会走 ——
 线上站和 App 共用同一份代码。
 
+### 4. `setAllowContentAccess(true)` 不能顺手"加固"成 `false`
+
+写安全加固的清单里常把 `allowFileAccess = false` 和 `allowContentAccess = false`
+配成一对，但在这个 App 里两个的后果不一样：
+
+- `allowFileAccess = false` —— **要**。页面本地资源全走 `appassets.androidplatform.net`，
+  根本不需要 `file://`。
+- `allowContentAccess = false` —— **千万别**。它会让系统文件选择器返回的
+  `content://` 递不进页面：「选文件导入」照样能弹出选择器、照样能点中文件，
+  然后**什么都不发生**，而且**不报任何错**。这是最难查的一类故障。
+  （`MainActivity.java` 里那一行旁边有注释，改之前先看。）
+
 ## 已知的能力差异
 
 - **「选文件夹」在 App 里没有**：安卓的系统文件选择器没有「选一个目录」这回事，
