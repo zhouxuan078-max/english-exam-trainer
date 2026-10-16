@@ -2276,6 +2276,163 @@ function buildImportItem(type, lines) {
 /* 「我的题目」里各题型的名字和单位 —— 名字一律取 QTYPES，别再抄一份。
    ⚠️ 这里**不写分值**：分值跟考试绑死（四级仔细阅读 14.2 分、雅思就是 0），
       写在这里就等于把四级的尺子套到别的考试上。分值统一走 scorePerQOf()。 */
+/* ==========================================================================
+   兜底解析：按"题号 + 选项"抓题
+   --------------------------------------------------------------------------
+   ⚠️ 为什么必须有它：真实试卷**很少**写成 `Q: / A. / ANSWER:` 那套。
+      真题的典型长相是这样的 ——
+
+         Part II  Listening Comprehension (25 minutes)
+         Section A
+         Directions: In this section, you will hear three news reports...
+         Questions 1 to 2 are based on the news report you have just heard.
+         1. What is the man going to do?
+            A) Buy a ticket.  B) Catch a train.  C) Meet a friend.  D) Leave the city.
+         2. Where does the conversation most probably take place?
+            A) At a station. B) In a hotel. C) In an office. D) At an airport.
+
+      也就是说：**题号 + 题干 + 四选项挤在一行里**，用的是 `A)` 不是 `A.`，
+      前面还有 Directions 和 "Questions 1 to 2 are based on…" 这种引导句。
+      上面那套严格格式一个都套不上，所以必须先按"题号"找题、按"选项"切选项。
+
+   规则（都按"真实试卷怎么排"来定，不要求使用者改格式）：
+     · 题号：行首的 `1.` `1、` `1．` `1)` —— 而且**序号要大致递增**，
+       否则像 `26. ______` 这种正文里的编号会被误当成题。
+     · 选项：`A) ` `B. ` `C、` 都认，一行里塞多个也能切开。
+     · 题号之前的正文 = 这篇文章的**短文**（passage）。
+     · 题型优先看块标题（Part/Section 后面那个名字）；
+       没有标题就按"选项个数 + 有没有长短文"猜，再让考试匹配去筛。
+   ========================================================================== */
+
+/* 把一行里的 "A) xx  B) yy" 切成 ["xx","yy"]；也认 A. / A、/ A． */
+function splitOptionsLine(s) {
+  const t = String(s || '');
+  const re = /(?:^|(?<=\s))([A-F])\s*[)）、.．:：]\s*/g;
+  const parts = t.split(re);            // ['', 'A', 'xx ', 'B', 'yy', ...]
+  const out = [];
+  for (let i = 1; i + 1 < parts.length; i += 2) {
+    const v = parts[i + 1].trim();
+    if (v) out.push(v);
+  }
+  return out;
+}
+/* 把 "1. 题干 A) xx B) yy" 拆成 { head, options } */
+function splitHeadOptions(s) {
+  const t = String(s || '');
+  const re = /(?:^|(?<=\s))([A-F])\s*[)）、.．:：]\s*/;
+  const m = re.exec(t);
+  if (!m) return { head: t.trim(), options: [] };
+  return { head: t.slice(0, m.index).trim(), options: splitOptionsLine(t.slice(m.index)) };
+}
+
+/* 按"题号行"把一段文字拆成 passage + questions */
+function looseQuestions(lines) {
+  const qre = /^\s*(\d{1,3})\s*[.、．)）]\s*(.*)$/;
+  const qs = [];
+  const passage = [];
+  let cur = null, lastN = 0;
+  lines.forEach(line => {
+    const m = qre.exec(line);
+    /* ⚠️ 判"这一行是不是一道题的题号行"，两个条件缺一不可：
+       1) 序号递增（真实试卷里 26. ______ 这种**空位编号**长得一模一样，
+          但它属于正文；靠"题目按顺序排"能区分开）
+       2) 这一行**像一道题**：题干够长，或者这一行自己就带着选项
+       ⚠️ 别写"第一题必须 ≤ 5" —— 阅读部分常常从 46 题开始，
+          那样整段阅读会被整段判成"不是题"（踩过）。 */
+    const so0 = m ? splitHeadOptions(m[2]) : null;
+    const looksQ = !!m && (so0.options.length >= 2
+      || (m[2].replace(/[^A-Za-z\u4e00-\u9fff]/g, '').length >= 8 && !/^[_\-.\s]+$/.test(m[2])));
+    const inOrder = !!m && (qs.length === 0 || (+m[1] > lastN && +m[1] <= lastN + 8));
+    const isQ = looksQ && inOrder;
+    if (isQ) {
+      const so = splitHeadOptions(m[2]);
+      cur = { n: +m[1], q: so.head, options: so.options.slice(), answer: -1 };
+      qs.push(cur);
+      lastN = +m[1];
+      return;
+    }
+    if (!cur) { if (line.trim()) passage.push(line.trim()); return; }
+    const opts = splitOptionsLine(line);
+    if (opts.length >= 2) { cur.options = cur.options.concat(opts); return; }
+    const one = /^\s*([A-F])\s*[)）、.．:：]\s*(.+?)\s*$/.exec(line);
+    if (one && one[2]) { cur.options.push(one[2]); return; }
+    if (/^\s*(?:Answer|答案|【答案】|Key)\s*[:：]/.test(line)) {
+      const a = /([A-F])/.exec(line.replace(/^\s*(?:Answer|答案|【答案】|Key)\s*[:：]/, ''));
+      if (a) cur.answer = 'ABCDEF'.indexOf(a[1]);
+      return;
+    }
+    if (/^\s*(?:Directions?|说明|注意)\s*[:：]/i.test(line)) return;   // 指令行丢掉
+    if (!cur.options.length && line.trim()) cur.q += (cur.q ? ' ' : '') + line.trim();
+  });
+  return { passage: passage, questions: qs.filter(x => x.q || x.options.length) };
+}
+
+/* 这一段属于什么题型：先看标题，标题认不出来就按内容猜 */
+function looseTypeOf(headerName, block, examTypes) {
+  const byName = headerName ? sectionTypeOf(headerName) : null;
+  if (byName && examTypes.indexOf(byName) >= 0) return byName;
+  const qs = block.questions;
+  const nOpt = qs.length ? Math.max.apply(null, qs.map(q => (q.options || []).length)) : 0;
+  const longText = block.passage.join(' ').length > 200;
+  let order;
+  if (nOpt >= 4) order = longText
+    ? ['careful', 'single', 'listening', 'reading']
+    : ['listening', 'single', 'careful', 'quant'];
+  else if (nOpt === 3) order = ['single', 'listening', 'careful', 'quant'];
+  else if (nOpt === 2) order = ['judge', 'single', 'listening'];
+  else order = ['gap', 'cloze', 'translate'];
+  const pick = order.filter(t => examTypes.indexOf(t) >= 0)[0];
+  if (pick) return pick;
+  return byName || null;
+}
+
+/* 兜底入口：把整篇文字按"标题行"分块，每块按题号抓题 */
+function parseLooseBank(text) {
+  const examTypes = typesOf(curExam());
+  const blocks = _splitSections(text);
+  const out = {};
+  const notes = [];
+  blocks.forEach((sec, bi) => {
+    const b = looseQuestions(sec.lines);
+    if (!b.questions.length) return;
+    const type = looseTypeOf(sec.name, b, examTypes);
+    if (!type) return;
+    const it = {
+      id: 'L' + bi + '-' + Date.now().toString(36),
+      title: (sec.name || '').trim() || ('第 ' + (bi + 1) + ' 部分'),
+      origin: 'mine',
+    };
+    if (type === 'cloze' || type === 'gap') {
+      /* 选词/填空：正文里是 {{n}} 或 n. ______ 的空位。
+         答案多半在"答案解析"那一份里，会由 applyAnswerKey 补上。 */
+      it.passage = [b.passage.join('\n')];
+      it.answers = {};
+      b.questions.forEach(q => { it.answers[q.n] = ''; });
+    } else if (type === 'matching') {
+      it.passage = [b.passage.join('\n')];
+      it.statements = b.questions.map(q => ({ s: q.q, answer: '' }));
+    } else if (type === 'write' || type === 'translate' || type === 'speak') {
+      it.material = (b.passage.join('\n') + '\n' + b.questions.map(q => q.q).join('\n')).trim();
+    } else {
+      it.passage = b.passage.slice();
+      it.questions = b.questions.map(q => ({
+        q: q.q || ('第 ' + q.n + ' 题'),
+        options: q.options,
+        answer: q.answer,
+        n: q.n,                       // 原题号：答案串是对着题号来的
+      }));
+    }
+    if (!out[type]) out[type] = [];
+    out[type].push(it);
+  });
+  Object.keys(out).forEach(k => {
+    const n = out[k].reduce((a, it) => a + (it.questions || it.statements
+      || Object.keys(it.answers || {})).length, 0);
+    if (n) notes.push(myTypeMeta(k).name + ' ' + out[k].length + ' 篇 / ' + n + ' 题');
+  });
+  return { out: out, notes: notes };
+}
+
 /* 从试卷文本里读"分值标注"。
    使用者要求：**试卷里标了多少分，就按试卷的算**（没标才按考试标准）。
    认这几种写法（都很常见）：
@@ -3178,7 +3335,9 @@ function applyAnswerKey(types, text) {
       (it.questions || []).forEach((q, qi) => flat.push({ it: it, q: q, key: t.type + ':' + qi }));
     }));
     flat.forEach((x, k) => {
-      const L = seq[k];
+      /* ⚠️ 答案串是**对着题号**的（阅读从 46 开始），不能一律按顺序对 ——
+         否则 46/47 的答案会错位贴到第 1、2 题上。有题号就用题号。 */
+      const L = (x.q.n != null && seq[x.q.n]) ? seq[x.q.n] : seq[k];
       if (!L) return;
       const idx = 'ABCD'.indexOf(L);
       if (idx < 0) return;
@@ -3612,22 +3771,45 @@ function parseMyBankInput(text) {
     return { ok: true, types, unknown: [], guessed: [], issues: diagnoseTypes(types) };
   }
   // 文本格式
-  const parsed = parseMyBankText(s);
-  const types = Object.keys(parsed.out).map(k =>
-    ({ type: k, typeName: myTypeMeta(k).name, items: parsed.out[k] }));
+  const toTypes = o => Object.keys(o).map(k =>
+    ({ type: k, typeName: myTypeMeta(k).name, items: o[k] }));
+  let parsed = parseMyBankText(s);
+  let usedLoose = false;
+  let types = toTypes(parsed.out);
+  /* ⚠️ 两件事都要兜住：
+     1) 严格格式一套都没套上（真实试卷根本不写 Q: / A. / ANSWER: 那套）
+     2) 严格格式**误判**了题型 —— 比如把 "Listening Comprehension" 认成「听写」，
+        那一查"这场考试不考它"就直接拒绝了，兜底解析连机会都没有（踩过）。
+     所以：严格版没出来、或者出来的题型这场考试不认，就再走一遍"按题号抓题"。 */
+  let bad = types.length ? checkExamFit(types) : [];
+  if (!types.length || bad.length) {
+    const loose = parseLooseBank(s);
+    const lt = toTypes(loose.out);
+    if (lt.length && !checkExamFit(lt).length) {
+      parsed = { out: loose.out, unknown: [], guessed: loose.notes, notes: [] };
+      types = lt;
+      bad = [];
+      usedLoose = true;
+    }
+  }
   if (!types.length) {
     return {
       ok: false,
-      msg: '没解析出任何题目。看看是不是缺了 === 仔细阅读 === 这样的分节标题',
+      msg: '没解析出题目。这份文件里没有找到带题号的选择题或填空题',
       unknown: parsed.unknown,
     };
   }
   /* ⚠️ 只挡"这场考试不考的题型" —— **不**因为少了哪些题型就报错。
      用户明确说过：只导入一部分（比如这次只加阅读、没加听力）是正常用法。 */
-  const bad = checkExamFit(types);
   if (bad.length) return { ok: false, mismatch: bad, unknown: parsed.unknown };
-  return { ok: true, types, unknown: parsed.unknown, guessed: parsed.guessed,
-           notes: parsed.notes, issues: diagnoseTypes(types) };
+  const notes = (parsed.notes || []).slice();
+  if (usedLoose) {
+    notes.unshift('这份文件没有 === 分节标题 ===，我按"题号 + 选项"抓的题：'
+      + (parsed.guessed || []).join('、') + '。');
+  }
+  return { ok: true, types, unknown: parsed.unknown,
+           guessed: usedLoose ? [] : parsed.guessed,
+           notes: notes, issues: diagnoseTypes(types) };
 }
 
 /* 把「自备材料」和「我的题目」并进当前题库。
