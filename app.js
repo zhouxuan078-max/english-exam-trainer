@@ -436,6 +436,18 @@ function migrateExamCfg() {
       LS.set('exam', { id: old.id });
     }
   }
+  /* 「我的题目」原来是一坨 {types:[...]}，现在是"一叠试卷"。
+     老数据收成一张叫「我导入的题目」的卷子，别让它凭空消失。 */
+  EXAMS.forEach(e => {
+    const om = LS.get('mybank:' + e.id, null);
+    if (om && Array.isArray(om.types) && om.types.length && !LS.get('papers:' + e.id, null)) {
+      LS.set('papers:' + e.id, { v: 2, list: [{
+        id: 'pmig', name: '我导入的题目', src: 'mybank-migrated', addedAt: today(),
+        types: om.types, marks: {}, audio: [], group: '',
+      }] });
+      LS.set('mybank:' + e.id, null);
+    }
+  });
   const my = LS.get('mybank', null);
   if (my && Array.isArray(my.types) && my.types.length) {
     const id = (old && old.id && EXAMS_BY_ID[old.id]) ? old.id : DEFAULT_EXAM_ID;
@@ -630,33 +642,20 @@ function loadExamScoped() {
   days = LS.get(k.days, []) || [];
 }
 
-/* ---------- 练习范围：整套卷子 / 我的题目 ----------
-   只导入了一部分题目时，按"整套卷子"算进度会很难看：四级卷面几十题，
-   用户只导了 5 篇，那条进度条永远停在个位数，看着像坏了。
-   所以给一个开关：
-     paper 整套卷子：题库 = 站内自带 + 我的题目；进度和折算分都按卷面来
-     mine  我的题目：题库 = **只有我导入的**；进度按"导了多少 / 做了多少"，
-                     只报答对几题 —— 练习题本来就没有卷面权重，硬折算分是假的
-   按考试各存一份：四级用我的题练，不该改掉六级的整套卷子口径。 */
-function scopeKey() { return 'scope:' + curExam().id; }
-function curScope() { return LS.get(scopeKey(), 'paper') === 'mine' ? 'mine' : 'paper'; }
-function setScope(v) {
-  LS.set(scopeKey(), v === 'mine' ? 'mine' : 'paper');
-  rebuildBank();
-  render();
-}
+/* ---------- 我的题目的进度与统分 ----------
+   ⚠️ 原来有「整套卷子 / 我的题目」两个口径，现在**只留我的题目**。
+      理由：使用者导入的一般就是卷子本身；而且按"整套卷子"算的话，
+      只导了几篇时进度条永远停在个位数，看着像坏了。
+   现在的算法：
+     分母 = 我这份/这些试卷里实际有多少题（**少了题型总分会跟着少**，
+            这就是"只导了一部分也仍然算一套卷子"的意思）
+     统分 = 答对的小题数 × 该题型每题分值
+            每题分值优先用**试卷里标出来的**（"每题 2 分"/"共 10 分"），
+            没标就按这场考试的标准（四级仔细阅读 142÷10 = 14.2）。 */
 
-/* 当前范围里"值得列出来"的题型。
-   paper 模式照常列全（没题的进去会看到导入引导，这是原来就有的行为）；
-   mine 模式只列我真导了题的 —— 别的点进去只会是空的。 */
+/* 当前范围里"值得列出来"的题型：只列我真有题的 —— 别的点进去只会是空的 */
 function activeTypes() {
-  const all = typesOf(curExam());
-  if (curScope() !== 'mine') return all;
-  return all.filter(t => {
-    if (t === 'listen') return listenCountNow() > 0;
-    const bt = S.bank && S.bank.types.find(x => x.type === t);
-    return !!(bt && bt.items.length);
-  });
+  return typesOf(curExam()).filter(t => typeCountNow(t) > 0);
 }
 /* 当前题库里这个题型有多少条（listen 不在 bank.types 里，走 S.listen） */
 function typeCountNow(t) {
@@ -673,29 +672,56 @@ function scopeDoneCount(t) {
   return t === 'listen' ? listenDoneCount() : doneCountOf(t);
 }
 
-/* 「这套卷子的进度」：分母跟着练习范围走。 */
+/* 这个题型里"一个计分单位"有几项：
+   仔细阅读/听力/判断/单选/数学 → 小题数；匹配 → 句子数；选词/填空 → 空位数 */
+function unitCountOf(type, items) {
+  let n = 0;
+  (items || []).forEach(it => {
+    if (type === 'matching') n += (it.statements || []).length;
+    else if (type === 'cloze' || type === 'gap') n += Object.keys(it.answers || {}).length;
+    else if (OPEN_TYPES.indexOf(type) >= 0) n += 1;
+    else n += (it.questions || []).length;
+  });
+  return n;
+}
+
+/* 某个题型"每题/每空多少分"：试卷里标过就用标的，否则按考试标准 */
+function perScoreOf(type) {
+  const ov = paperMarkOf(type);
+  if (ov) return ov;
+  return scorePerQOf(type);
+}
+/* 试卷里标了分值的题型，按整份试卷算总分 */
 function scopeProgress() {
-  const types = activeTypes();
-  let total = 0, done = 0;
-  types.forEach(t => {
-    total += typeCountNow(t);
-    done += scopeDoneCount(t);
-  });
-  const pct = total ? Math.round(done / total * 100) : 0;
-  // 统分：每个题型"答对几小题 × 官方每题分值"，加起来 —— 分值从这场考试的卷面来，
-  // 所以这就是官方那套算法。练习题（mine 模式）不折算，只报答对几题。
-  let got = 0, scorable = 0, right = 0;
-  types.forEach(t => {
-    const bt = S.bank && S.bank.types.find(x => x.type === t);
-    if (!bt) return;
-    right += correctCountOf(bt);
-    const per = scorePerQOf(t);
+  /* ⚠️ 分母只算**我的题目** —— 站内自带的那点原创题不混进来。
+     使用者要的是"我导的这套卷子做了多少"，把别的东西算进来就说不清了。 */
+  const mine = myBankTypes();
+  const types = [];
+  let total = 0, done = 0, full = 0, got = 0, right = 0, scored = false;
+  mine.forEach(t => {
+    if (t.type === 'listen') return;         // 听写单独算（在 S.listen 里）
+    const n = (t.items || []).length;
+    if (!n) return;
+    types.push(t.type);
+    total += n;
+    done += Math.min(scopeDoneCount(t.type), n);
+    const r1 = correctCountOf(t);
+    right += r1;
+    const per = perScoreOf(t.type);
     if (!per) return;
-    scorable++;
-    got += correctCountOf(bt) * per;
+    scored = true;
+    full += unitCountOf(t.type, t.items) * per;
+    got += r1 * per;
   });
-  return { types, total, done, pct, got, scorable, right,
-           all: total > 0 && done >= total, mine: curScope() === 'mine' };
+  const ln = myListenCount();
+  if (ln) {
+    types.push('listen');
+    total += ln;
+    done += Math.min(listenDoneCount(), ln);
+  }
+  const pct = total ? Math.round(done / total * 100) : 0;
+  return { types: types, total: total, done: done, pct: pct, got: got, full: full,
+           right: right, scored: scored, all: total > 0 && done >= total };
 }
 
 /* 某个题型已经做了多少条（提交过的条目才会留下 ans:<题型>:<序号>） */
@@ -1232,31 +1258,26 @@ function vHome() {
     <a href="#me" data-go="me"><div class="n">📊 我的</div><div class="d">错题 ${wrong.length} 条</div></a>
   </div>
 
-  <div class="sec">${scopeProgress().mine ? '我的题目的进度' : '这套卷子的进度'}</div>
+  <div class="sec">我的题目的进度</div>
   <div class="card tight">
-    <div class="row" style="margin:0 0 10px;gap:6px">
-      <button class="btn ${curScope() === 'paper' ? '' : 'ghost'} sm" data-scope="paper">整套卷子</button>
-      <button class="btn ${curScope() === 'mine' ? '' : 'ghost'} sm" data-scope="mine">我的题目</button>
-    </div>
     ${(() => {
       const p = scopeProgress();
       if (!p.total) {
-        return `<div class="empty">这个范围里还没有题目。${
-          curScope() === 'mine' ? '去「我的」导入你的题目。' : ''}</div>`;
+        return `<div class="empty">还没有题目。去「我的」把卷子导进来。</div>`;
       }
-      // 统分：每个题型"答对几小题 × 官方每题分值"，加起来
-      // —— 分值从这场考试的卷面来（四级仔细阅读 142÷10 = 14.2），所以是官方那套算法。
-      // mine 模式**不折算**：练习题本来就没有卷面权重，硬折出来是假的。
-      const scoreTxt = p.mine
-        ? `答对 <b>${p.right}</b> 题`
-        : (p.scorable === 0 ? ''
-          : (p.all ? `折算总分 <b>${(+p.got.toFixed(1))}</b> 分`
-                   : `已得 <b>${(+p.got.toFixed(1))}</b> 分`));
-      return `<div class="pbar"><i style="width:${p.pct}%"></i></div>
+      /* 统分：答对的小题数 × 每题分值。
+         ⚠️ 每题分值优先用**试卷里标的**，没标才按这场考试的标准。
+           所以"只导了一部分题型"时，只会总分变小 —— 仍然是一套卷子。 */
+      const scoreTxt = p.scored
+        ? `已得 <b>${(+p.got.toFixed(1))}</b> 分 / 满分 <b>${(+p.full.toFixed(1))}</b> 分`
+        : `答对 <b>${p.right}</b> 题`;
+      const who = activePaper() ? '「' + activePaper().name + '」' : '';
+      return `${who ? `<div class="meta" style="margin:0 0 8px">正在练：${esc(who)}</div>` : ''}
+        <div class="pbar"><i style="width:${p.pct}%"></i></div>
         <div class="meta" style="margin:9px 0 0">
           已做 <b>${p.done}</b> / ${p.total} 项 · <b>${p.pct}%</b>${
-            p.all ? (p.mine ? '（我的题目都做完了）' : '（这套卷子做完了）') : ''}</div>
-        ${scoreTxt ? `<div class="meta" style="margin-top:4px">${scoreTxt}</div>` : ''}`;
+            p.all ? '（做完了）' : ''}</div>
+        <div class="meta" style="margin-top:4px">${scoreTxt}</div>`;
     })()}
   </div>
 
@@ -1293,14 +1314,11 @@ function vTypePage(id) {
 
 function vTypeEmpty(id) {
   const q = QTYPES[id] || {};
-  const mine = curScope() === 'mine';
   return `<div class="card">
     <div class="ttl">${esc(q.name || id)}</div>
     <div class="meta" style="margin-top:6px">${esc(TYPE_DESC[id] || '')}</div>
-    <div class="empty">${mine ? '「我的题目」里还没有这一类的题。' : '这个题型还没有题目。'}</div>
-    <div class="row">${mine
-      ? '<button class="btn" data-scope="paper">改回整套卷子</button>'
-      : '<button class="btn" data-go="me">去「我的题目」导入</button>'}</div>
+    <div class="empty">这一类的题还没有。</div>
+    <div class="row"><button class="btn" data-go="me">去「我的」导入卷子</button></div>
   </div>`;
 }
 
@@ -1341,11 +1359,15 @@ function vItem(t, i) {
 
   if (t.type === 'careful' || CHOICE_TYPES.indexOf(t.type) >= 0) {
     // 听力：先播放，答完才给原文
-    if (it.script) {
+    if (it.audio || it.script) {
       h += `<div class="audio-card" style="padding:18px 12px 14px">
         <button class="bigbtn" id="playBtn" data-playq="1">▶</button>
-        <div class="meta" style="margin:0;text-align:center">点一下播放录音</div>
+        <div class="meta" style="margin:0;text-align:center">${
+          it.audio ? '点一下播放录音' : '没有配音频，点一下用浏览器朗读原文'}</div>
       </div>`;
+    } else {
+      h += `<div class="meta" style="margin:0 0 6px;color:var(--warn)">
+        这道听力题没有配音频，也没有原文 —— 只能自己做（声音和原文都缺）。</div>`;
     }
     const paras = [].concat(it.passage || []);
     if (paras.length) {
@@ -1841,14 +1863,70 @@ POINTS:
 SAMPLE:
 Should the library stay open longer during the exam period? I believe it should.`;
 
-/* 「我的题目」按考试分开存。
-   ⚠️ 用户说过"这些考试都应该有自己独立的东西" —— 在四级里导入的阅读材料，
-      切到六级就不该出现（题型要求、难度、卷面权重都不是一回事）。
-      而且不分开的话，导入的内容会把**每个考试**的题库都往前挤，记录全错位。 */
-function myBankKey() { return 'mybank:' + curExam().id; }
+/* ==========================================================================
+   「我的题目」= 一堆**试卷**，一份文件就是一张卷子
+   --------------------------------------------------------------------------
+   数据（都按考试分开存，在四级导入的东西切到六级不该出现）：
+     papers:<考试>  → { v: 2, list: [paper, ...] }
+     paper:<考试>   → 当前选中练哪一张（不选 = 全部一起练）
+     paper = {
+       id, name,             // name 默认取文件名，使用者可以在页面里改（不弹文件管理器）
+       src,                  // 原始文件名，改名不动它
+       addedAt,
+       types: [{ type, items }],
+       marks: { 题型: 每题分值 },   // 试卷里标了分值就用标的，没标就按考试标准
+       audio: [{ id, name }]       // 配上的音频（内容存在 IndexedDB 里，太大塞不进本地存储）
+     }
+   ========================================================================== */
+function papersKey() { return 'papers:' + curExam().id; }
+function activePaperKey() { return 'paper:' + curExam().id; }
+
+function myPapers() {
+  const d = LS.get(papersKey(), null);
+  return (d && Array.isArray(d.list)) ? d.list : [];
+}
+function savePapers(list) {
+  LS.set(papersKey(), { v: 2, list: list });
+}
+/* 当前练的是哪一张；'' 表示"全部一起练" */
+function activePaperId() { return LS.get(activePaperKey(), '') || ''; }
+function activePaper() {
+  const id = activePaperId();
+  if (!id) return null;
+  return myPapers().find(p => p.id === id) || null;
+}
+function setActivePaper(id) {
+  LS.set(activePaperKey(), id || '');
+  rebuildBank();
+  render();
+}
+
+/* 当前要练的那些试卷：选了某一张就只算它，没选就算全部。
+   ⚠️ 进度、统分、题库**全都**跟着这个走 —— 这就是"选择我的题目"。 */
+function currentPapers() {
+  const all = myPapers();
+  const one = activePaper();
+  return one ? [one] : all;
+}
+/* 当前试卷的题目，按题型汇总（listen 单独走 S.listen） */
 function myBankTypes() {
-  const my = LS.get(myBankKey(), null);
-  return (my && Array.isArray(my.types)) ? my.types : [];
+  const out = [];
+  currentPapers().forEach(p => {
+    (p.types || []).forEach(t => {
+      let slot = out.find(x => x.type === t.type);
+      if (!slot) { slot = { type: t.type, typeName: myTypeMeta(t.type).name, items: [] }; out.push(slot); }
+      slot.items = slot.items.concat(t.items || []);
+    });
+  });
+  return out;
+}
+/* 某题型"每题多少分"：试卷标过就用标的 */
+function paperMarkOf(type) {
+  const ps = currentPapers();
+  for (const p of ps) {
+    if (p.marks && p.marks[type]) return p.marks[type];
+  }
+  return null;
 }
 
 /* 阅读类条数（不含听力，听力按"句"算） */
@@ -1859,6 +1937,11 @@ function myBankCount() {
 function myListenCount() {
   const t = myBankTypes().find(x => x.type === 'listen');
   return t ? t.items.length : 0;
+}
+/* 当前范围里一共有多少"小题/空" —— 统分的分母用这个 */
+function myUnitCount() {
+  return myBankTypes().reduce((a, t) => a + unitCountOf(t.type, t.items), 0)
+    + (S.listen ? (S.listen.items || []).length : 0);
 }
 
 /* --- 文本格式解析 --- */
@@ -2196,6 +2279,36 @@ function buildImportItem(type, lines) {
 /* 「我的题目」里各题型的名字和单位 —— 名字一律取 QTYPES，别再抄一份。
    ⚠️ 这里**不写分值**：分值跟考试绑死（四级仔细阅读 14.2 分、雅思就是 0），
       写在这里就等于把四级的尺子套到别的考试上。分值统一走 scorePerQOf()。 */
+/* 从试卷文本里读"分值标注"。
+   使用者要求：**试卷里标了多少分，就按试卷的算**（没标才按考试标准）。
+   认这几种写法（都很常见）：
+     每题 2 分 / 每小题 2 分 / 每空 1.5 分 / 每问 2 分 / 每句 1 分
+     共 10 分 / 小计 10 分 / 合计 10 分 / 满分 10 分 /（10 分）/ (10 分)
+   标"每题"的直接用；标"共/小计"的除以这一类的题量，换算成每题多少分。 */
+function parseImportMarks(text, types) {
+  const marks = {};
+  const raw = {};
+  _splitSections(text).forEach(sec => {
+    const type = sec.name ? sectionTypeOf(sec.name) : null;
+    if (!type || raw[type]) return;
+    const body = sec.lines.join('\n');
+    const p = /每\s*(?:小)?\s*(?:题|空|问|句|小题)\s*([\d.]+)\s*分/.exec(body);
+    if (p) { raw[type] = { per: parseFloat(p[1]) }; return; }
+    const tot = /(?:共|小计|合计|满分)\s*([\d.]+)\s*分/.exec(body)
+      || /[（(]\s*([\d.]+)\s*分\s*[）)]/.exec(body);
+    if (tot) raw[type] = { total: parseFloat(tot[1]) };
+  });
+  const list = types || [];
+  Object.keys(raw).forEach(type => {
+    const v = raw[type];
+    if (v.per) { if (v.per > 0) marks[type] = v.per; return; }
+    const items = ((list.find(x => x.type === type) || {}).items) || [];
+    const n = unitCountOf(type, items);
+    if (n > 0 && v.total > 0) marks[type] = v.total / n;
+  });
+  return marks;
+}
+
 function myTypeMeta(type) {
   const q = QTYPES[type] || {};
   return { name: q.name || type, unit: q.unit || '篇' };
@@ -2374,7 +2487,8 @@ async function readImportFile(file) {
     if (txt) return { ok: true, text: txt };
     /* 读不出文字不代表没救：扫描件 PDF 的整页就是一张 JPEG，
        而且原样存在文件里，可以直接抠出来交给离线识别。 */
-    const imgs = pdfEmbeddedJpegs(ab);
+    let imgs = pdfEmbeddedJpegs(ab);
+    if (!imgs.length) imgs = await pdfFlateImages(pdfLatin1(ab));   // 原始位图那种
     if (imgs.length) return { ok: false, pdfImages: imgs };
     return { ok: false, msg: '这个 PDF 里既没有可以直接复制的文字，'
       + '也没有能抠出来的整页图（可能是用浏览器「打印成 PDF」生成的特殊格式）。'
@@ -2434,8 +2548,21 @@ async function textFromPdf(buf) {
       按 raw deflate 解：既不用算 adler32，也不怕尾部那点垃圾。 */
 async function inflatePdfStream(bytes) {
   if (typeof DecompressionStream === 'undefined' || bytes.length < 4) return null;
-  const body = (bytes[0] === 0x78) ? bytes.subarray(2) : bytes;
-  return await inflateWith(body, 'deflate-raw');
+  const zlib = bytes[0] === 0x78;
+  const body = zlib ? bytes.subarray(2) : bytes;
+  let t = await inflateWith(body, 'deflate-raw');
+  if (t) return t;
+  if (zlib) { t = await inflateWith(bytes, 'deflate'); if (t) return t; }
+  /* ⚠️ 尾部逐字节回退重试。
+     踩过：在 node 里试出来"deflate-raw 能容忍尾部多余的字节"，就以为不用管了；
+     结果**浏览器里不容忍** —— PDF 的流在 endstream 前带个 \r\n 就整段解压失败，
+     表现还是"PDF 一个字都读不出来"。所以这里老老实实从尾巴上一点点削。
+     最多削 16 字节，够覆盖 \r\n、多余的空格和偶发的补位字节。 */
+  for (let cut = 1; cut <= 16 && cut < body.length; cut++) {
+    t = await inflateWith(body.subarray(0, body.length - cut), 'deflate-raw');
+    if (t) return t;
+  }
+  return null;
 }
 
 /* 扫描件 PDF：整页其实就是一张（或几张）JPEG，没有可复制的文字。
@@ -2466,6 +2593,151 @@ function pdfEmbeddedJpegs(buf) {
     while (b2 > a + 2 && !(u8[b2 - 2] === 0xff && u8[b2 - 1] === 0xd9)) b2--;
     if (b2 - a < 4096) continue;               // 太小了，多半不是整页图
     out.push(new Blob([u8.subarray(a, b2)], { type: 'image/jpeg' }));
+  }
+  return out;
+}
+
+/* ==========================================================================
+   PDF 取字（第三部分）：对象流 + 原始位图
+   --------------------------------------------------------------------------
+   第三个坑：现代 PDF（Chrome「打印成 PDF」、新版 Word）会把页对象、字体对象
+   **打包塞进"对象流"**（/Type /ObjStm），它们在文件正文里根本搜不到
+   "12 0 obj" 这种字面 —— 于是拿不到字体的 /ToUnicode 表，
+   内容流里的字形编号一个也解不出来，表现就是"有字却一个字都读不到"。
+
+   第四个坑：整页图不一定是 JPEG。Chrome 打印出来的 PDF 常把图重新编码成
+   **原始位图 + FlateDecode**（还可能带 PNG 预测器），那就没有 FFD8/FFD9 可抠，
+   得自己把像素解出来贴到 canvas 上。
+   ========================================================================== */
+
+/* 把对象流里的对象也收进来，和文件正文里的对象合成一份表 */
+async function pdfCollectObjects(raw) {
+  const objs = pdfObjects(raw);
+  const re = /\/Type\s*\/ObjStm/g;
+  let m;
+  while ((m = re.exec(raw))) {
+    const sIdx = raw.indexOf('stream', m.index);
+    if (sIdx < 0) break;
+    let p = sIdx + 6;
+    if (raw[p] === '\r') p++;
+    if (raw[p] === '\n') p++;
+    const eIdx = raw.indexOf('endstream', p);
+    if (eIdx < 0) break;
+    re.lastIndex = eIdx;
+    const dStart = raw.lastIndexOf('<<', m.index);
+    const dict = raw.slice(dStart < 0 ? m.index : dStart, sIdx);
+    const n = +((/\/N\s+(\d+)/.exec(dict) || [])[1] || 0);
+    const first = +((/\/First\s+(\d+)/.exec(dict) || [])[1] || 0);
+    if (!n) continue;
+    const bytes = new Uint8Array(eIdx - p);
+    for (let i = p; i < eIdx; i++) bytes[i - p] = raw.charCodeAt(i) & 0xff;
+    const txt = /\/FlateDecode/.test(dict)
+      ? ((await inflatePdfStream(bytes)) || (await inflateWith(bytes, 'deflate')))
+      : raw.slice(p, eIdx);
+    if (!txt) continue;
+    const head = txt.slice(0, first);
+    const nums = head.trim().split(/\s+/).map(Number).filter(x => !isNaN(x));
+    for (let k = 0; k + 1 < nums.length; k += 2) {
+      const num = String(nums[k]);
+      const off = nums[k + 1];
+      const nextOff = (k + 3 < nums.length) ? nums[k + 3] : (txt.length - first);
+      if (nextOff <= off) continue;
+      objs[num] = { head: txt.slice(first + off, first + nextOff), inStm: true };
+    }
+  }
+  return objs;
+}
+
+/* PNG 预测器（FlateDecode 的图常带 /Predictor 12）→ 把行内差分还原成像素 */
+function pngUnpredict(data, colors, bpc, columns) {
+  const bpp = Math.max(1, Math.ceil(colors * bpc / 8));
+  const rowLen = Math.ceil(colors * bpc * columns / 8);
+  const rows = Math.floor(data.length / (rowLen + 1));
+  if (!rows || !rowLen) return null;
+  const out = new Uint8Array(rowLen * rows);
+  let ip = 0, op = 0;
+  for (let r = 0; r < rows; r++) {
+    const ft = data[ip++];
+    for (let i = 0; i < rowLen; i++) {
+      const a = i >= bpp ? out[op + i - bpp] : 0;
+      const b = r > 0 ? out[op + i - rowLen] : 0;
+      const c = (i >= bpp && r > 0) ? out[op + i - rowLen - bpp] : 0;
+      let v = data[ip + i];
+      if (ft === 1) v += a;
+      else if (ft === 2) v += b;
+      else if (ft === 3) v += ((a + b) >> 1);
+      else if (ft === 4) {
+        const pp = a + b - c;
+        const pa = Math.abs(pp - a), pb = Math.abs(pp - b), pc = Math.abs(pp - c);
+        v += (pa <= pb && pa <= pc) ? a : (pb <= pc ? b : c);
+      }
+      out[op + i] = v & 0xff;
+    }
+    ip += rowLen;
+    op += rowLen;
+  }
+  return out;
+}
+
+/* 整页的"原始位图"（/Filter /FlateDecode + /Subtype /Image）→ 一张能识别的图。
+   只处理最常见的 8 位灰度 / RGB（试卷扫描件基本都是这两种）。 */
+async function pdfFlateImages(raw) {
+  const out = [];
+  const re = /\/Subtype\s*\/Image/g;
+  let m;
+  while ((m = re.exec(raw)) && out.length < 12) {
+    const dStart = raw.lastIndexOf('<<', m.index);
+    const sIdx = raw.indexOf('stream', m.index);
+    if (sIdx < 0) break;
+    const dict = raw.slice(dStart < 0 ? m.index : dStart, sIdx);
+    let p = sIdx + 6;
+    if (raw[p] === '\r') p++;
+    if (raw[p] === '\n') p++;
+    const eIdx = raw.indexOf('endstream', p);
+    if (eIdx < 0) break;
+    re.lastIndex = eIdx;
+    if (/\/DCTDecode|\/JPXDecode|\/CCITTFaxDecode/.test(dict)) continue;  // 那几种另说
+    if (!/\/FlateDecode/.test(dict)) continue;
+    const w = +((/\/Width\s+(\d+)/.exec(dict) || [])[1] || 0);
+    const h = +((/\/Height\s+(\d+)/.exec(dict) || [])[1] || 0);
+    const bpc = +((/\/BitsPerComponent\s+(\d+)/.exec(dict) || [])[1] || 8);
+    if (!w || !h || bpc !== 8 || w * h < 10000) continue;
+    const gray = /\/DeviceGray/.test(dict);
+    const rgb = /\/DeviceRGB/.test(dict);
+    if (!gray && !rgb) continue;
+    const colors = gray ? 1 : 3;
+    const bytes = new Uint8Array(eIdx - p);
+    for (let i = p; i < eIdx; i++) bytes[i - p] = raw.charCodeAt(i) & 0xff;
+    let data = await inflatePdfStream(bytes);
+    if (!data) data = await inflateWith(bytes, 'deflate');
+    if (!data) continue;
+    const raw2 = new Uint8Array(data.length);
+    for (let i = 0; i < data.length; i++) raw2[i] = data.charCodeAt(i) & 0xff;
+    let px = raw2;
+    if (/\/Predictor\s+(1[0-9]|2[0-9]|3[0-9])/.test(dict)) {
+      const up = pngUnpredict(raw2, colors, bpc, w);
+      if (!up) continue;
+      px = up;
+    }
+    if (px.length < w * h * colors) continue;
+    try {
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      const g = cv.getContext('2d');
+      const img = g.createImageData(w, h);
+      for (let i = 0, j = 0; i < w * h; i++) {
+        if (gray) {
+          const v = px[i];
+          img.data[j++] = v; img.data[j++] = v; img.data[j++] = v; img.data[j++] = 255;
+        } else {
+          img.data[j++] = px[i * 3]; img.data[j++] = px[i * 3 + 1];
+          img.data[j++] = px[i * 3 + 2]; img.data[j++] = 255;
+        }
+      }
+      g.putImageData(img, 0, 0);
+      const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
+      if (blob && blob.size > 4096) out.push(blob);
+    } catch (e) { /* 这一张算了 */ }
   }
   return out;
 }
@@ -2528,12 +2800,10 @@ function pdfObjects(raw) {
 }
 
 /* 取某个对象里的流（该解压就解压） */
-async function pdfStreamOfObj(raw, objNum, objs) {
-  const o = objs[objNum];
-  if (!o) return null;
+async function pdfStreamOfObj(raw, objNum) {
   const at = raw.indexOf(objNum + ' 0 obj');
   if (at < 0) return null;
-  const sm = /\bstream\r?\n/.exec(raw.slice(at, o.end));
+  const sm = /\bstream\r?\n/.exec(raw.slice(at, at + 8000));
   if (!sm) return null;
   const dict = raw.slice(at, at + sm.index);
   let p = at + sm.index + sm[0].length;
@@ -2586,15 +2856,21 @@ function parseToUnicode(cmap) {
 
 /* 资源名（F1/F2…）→「字形编号 → 文字」的表 */
 async function pdfFontMaps(raw) {
-  const objs = pdfObjects(raw);
+  const objs = await pdfCollectObjects(raw);   // 含被塞进对象流里的那些
   const byName = {};
-  const re = /\/Font\s*<<([\s\S]{0,6000}?)>>/g;
-  let m;
-  while ((m = re.exec(raw))) {
-    const re2 = /\/([A-Za-z0-9_.+-]+)\s+(\d+)\s+\d+\s+R/g;
-    let mm;
-    while ((mm = re2.exec(m[1]))) byName[mm[1]] = mm[2];
-  }
+  /* ⚠️ 不能只扫文件正文：字体对象常常整段被压进对象流里，
+      正文里根本没有 "/Font << /F1 ... >>" 这行字。要把每个对象的正文也扫一遍。 */
+  const scan = (text) => {
+    const re = /\/Font\s*<<([\s\S]{0,6000}?)>>/g;
+    let m;
+    while ((m = re.exec(text))) {
+      const re2 = /\/([A-Za-z0-9_.+-]+)\s+(\d+)\s+\d+\s+R/g;
+      let mm;
+      while ((mm = re2.exec(m[1]))) byName[mm[1]] = mm[2];
+    }
+  };
+  scan(raw);
+  Object.keys(objs).forEach(k => scan(objs[k].head || ''));
   const maps = {};
   const cache = {};
   for (const nm in byName) {
@@ -2604,7 +2880,7 @@ async function pdfFontMaps(raw) {
     if (!uo) continue;
     const key = uo[1];
     if (!(key in cache)) {
-      const cm = await pdfStreamOfObj(raw, key, objs);
+      const cm = await pdfStreamOfObj(raw, key);
       cache[key] = cm ? parseToUnicode(cm) : {};
     }
     maps[nm] = cache[key];
@@ -2776,88 +3052,396 @@ function ocrWhyUnavailable(e) {
 let importReport = null;   // 最近一次导入的结果（成功/失败都留在这儿给用户看）
 let myPanelOpen = false;
 
+const AUDIO_EXT = /^(mp3|m4a|wav|ogg|oga|aac|flac|opus|weba|mp4)$/;
+/* 文件的"组"：文件夹导入时用它在的目录，普通选择文件时为空。
+   音频就是靠这个配到对应卷子上的（同一个文件夹里的音频 ↔ 同一个文件夹里的卷子）。 */
+function groupOf(f) {
+  const rel = f.webkitRelativePath || f._rel || '';
+  if (!rel) return '';
+  const i = rel.lastIndexOf('/');
+  return i < 0 ? '' : rel.slice(0, i);
+}
+/* 文件名主干（去掉扩展名），用来在"没按文件夹导"时按名字配音频 */
+function baseNameOf(s) {
+  return String(s || '').replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '')
+    .replace(/[\s_\-]*(听力|音频|录音|audio|listening|reading)$/i, '').trim();
+}
+
+/* 读一个文件 → 文字。读不出来的地方都记进 problems / notes。 */
+async function readOneImport(f, tag, problems, notes) {
+  const r = await readImportFile(f);
+  if (r.ok) return r.text;
+  /* 扫描件 PDF：整页是图，逐页离线识别。
+     ⚠️ 站内识别只装了英文模型（使用者是要练英语的，装中文要多背十几兆）。
+        中文扫描件识别不出来，要如实说明，别让人以为是坏了。 */
+  if (r.pdfImages) {
+    try { await loadOcrLib(); } catch (e) {
+      problems.push(f.name + '：这是扫描件（整页是图），要靠文字识别才能读，但 '
+        + ocrWhyUnavailable(e) + ' 两个办法：把每页截图后用手机相册／微信的'
+        + '「提取文字」，或者改用浏览器里的在线版再传这个 PDF。');
+      return null;
+    }
+    const pages = r.pdfImages.slice(0, 10);
+    const got = [];
+    for (let k = 0; k < pages.length; k++) {
+      try {
+        const d = await ocrImage(pages[k], m => importNote(tag + ' 识别第 ' + (k + 1)
+          + '/' + pages.length + ' 页：' + m.status
+          + (m.progress ? ' ' + Math.round(m.progress * 100) + '%' : '')));
+        const v = ocrVerdict(d);
+        if (v.ok) got.push(v.text);
+        else problems.push(f.name + ' 第 ' + (k + 1) + ' 页：' + v.why + '，这一页跳过了。');
+      } catch (e) {
+        problems.push(f.name + '：第 ' + (k + 1) + ' 页识别失败（' + e.message + '）。');
+        break;
+      }
+    }
+    if (!got.length) {
+      problems.push(f.name + '：这是扫描件，但站内识别只装了英文模型，里面没读出可用的'
+        + '英文（中文扫描件请用手机相册／微信的「提取文字」转成文字再粘进来）。');
+      return null;
+    }
+    notes.push(f.name + '：这是扫描件，按图片识别了 ' + got.length + '/' + pages.length
+      + ' 页 —— 识别难免有错字，做一遍题就能看出来。');
+    return got.join('\n\n');
+  }
+  if (r.image) {
+    try {
+      const d = await ocrImage(f, m => importNote(tag + ' 识别中：' + m.status
+        + (m.progress ? ' ' + Math.round(m.progress * 100) + '%' : '')));
+      const v = ocrVerdict(d);
+      if (v.ok) return v.text;
+      problems.push(f.name + '：这张图我读不清 —— ' + v.why
+        + '。请重拍（正对、光线足、一页一张），或者用手机相册／微信的「提取文字」'
+        + '把文字弄出来粘到下面。');
+    } catch (e) {
+      problems.push(f.name + '：' + ocrWhyUnavailable(e)
+        + ' 请用手机相册／微信的「提取文字」把文字取出来，粘到下面；'
+        + '或者改用浏览器里的在线版（那里带了识别引擎）再传这张图。');
+    }
+    return null;
+  }
+  problems.push(f.name + '：' + r.msg);
+  return null;
+}
+
+/* 文件名看着像"答案 / 解析"吗 */
+function isAnswerFile(name) {
+  return /答案|解析|answer|ans\b|key|solution|参考/i.test(String(name || ''));
+}
+
+/* 把"答案 / 解析"那一份合到题目上。
+   一张卷子常常是三份东西放一个文件夹：听力音频 + 试卷本体 + 答案解析。
+   这里负责把第三份并进第二份。
+   两种写法都认：
+     ① 和试卷同格式（Q / ANSWER / EXPLAIN）→ 按同题型、同顺序对齐
+     ② 纯答案串（1-5 ABCDA / 1. A 2. B / 1:A）→ 按顺序填
+   ⚠️ 只在题目**原本没标答案**时填，别把已经对的覆盖掉。 */
+function applyAnswerKey(types, text) {
+  let filled = 0;
+  /* ① 同格式：直接解析一遍，按同题型同顺序对齐 */
+  try {
+    const p = parseMyBankText(text);
+    Object.keys(p.out).forEach(k => {
+      const ans = p.out[k];
+      const t = types.find(x => x.type === k);
+      if (!t || !ans) return;
+      t.items.forEach((it, i) => {
+        const a = ans[i];
+        if (!a) return;
+        if (it.questions && a.questions) {
+          it.questions.forEach((q, k2) => {
+            const aq = a.questions[k2];
+            if (!aq) return;
+            if ((typeof q.answer !== 'number' || q.answer < 0)
+              && typeof aq.answer === 'number' && aq.answer >= 0) { q.answer = aq.answer; filled++; }
+            if (!q.explain && aq.explain) q.explain = aq.explain;
+          });
+        }
+        if (it.answers && a.answers) {
+          Object.keys(a.answers).forEach(n => {
+            if (!it.answers[n]) { it.answers[n] = a.answers[n]; filled++; }
+          });
+        }
+        if (it.statements && a.statements) {
+          it.statements.forEach((st, k2) => {
+            if (!st.answer && a.statements[k2] && a.statements[k2].answer) {
+              st.answer = a.statements[k2].answer; filled++;
+            }
+          });
+        }
+      });
+    });
+  } catch (e) { /* 解析不了就当纯答案串处理 */ }
+  /* ② 纯答案串：把选择题按顺序填 */
+  const seq = parseAnswerSequence(text);
+  if (seq.length) {
+    const flat = [];
+    types.forEach(t => (t.items || []).forEach(it => {
+      (it.questions || []).forEach((q, qi) => flat.push({ it: it, q: q, key: t.type + ':' + qi }));
+    }));
+    flat.forEach((x, k) => {
+      const L = seq[k];
+      if (!L) return;
+      const idx = 'ABCD'.indexOf(L);
+      if (idx < 0) return;
+      const os = x.q.options || [];
+      if (typeof x.q.answer === 'number' && x.q.answer >= 0) return;   // 已有答案不动
+      if (os.length && idx >= os.length) return;
+      x.q.answer = idx; filled++;
+    });
+  }
+  return filled;
+}
+
+/* 从纯答案文本里抽答案序号：认 "1-5 ABCDA" 和 "1. A / 1、A / 1:A" 两种 */
+function parseAnswerSequence(text) {
+  const s = String(text || '').replace(/\r/g, '');
+  const out = [];
+  let m;
+  const re1 = /(\d{1,3})\s*[-–~至]\s*(\d{1,3})\s*[:：.、]?\s*([A-Da-d]{2,})/g;
+  while ((m = re1.exec(s))) {
+    const a = +m[1], letters = m[3].toUpperCase();
+    if (+m[2] - a + 1 === letters.length) {
+      letters.split('').forEach((L, k) => { out[a + k] = L; });
+    }
+  }
+  if (out.length) return out;
+  const re2 = /(?:^|[\s,，、;；])(\d{1,3})\s*[.、:：)）]\s*([A-Da-d])(?![A-Za-z])/g;
+  while ((m = re2.exec(s))) out[+m[1]] = m[2].toUpperCase();
+  return out;
+}
+
+/* 这一组文件（= 一张试卷）叫什么名字 */
+function paperNameOf(bucket, mains) {
+  if (bucket.group) {
+    const seg = bucket.group.split('/').filter(Boolean).pop();
+    if (seg) return seg;
+  }
+  const f = (mains[0] || {}).f || (bucket.files[0] || {});
+  return String(f.name || '未命名试卷').replace(/\.[^.]+$/, '');
+}
+
 async function handleImportFiles(files) {
   const list = Array.prototype.slice.call(files || []).filter(Boolean);
   if (!list.length) return;
-  const chats = [], problems = [];
-  for (let i = 0; i < list.length; i++) {
-    const f = list[i];
-    const tag = '（' + (i + 1) + '/' + list.length + '）';
+  const problems = [], notes = [];
+
+  /* ⚠️ 分组规则（使用者定的）：**一个文件夹 = 一张试卷**。
+     一个文件夹里通常放三样东西：听力音频 + 试卷本体 + 答案解析。
+     没放在文件夹里的散文件，就一个文件算一张试卷。 */
+  const buckets = [];
+  list.forEach(f => {
+    const g = groupOf(f);
+    const key = g || ('\u0001' + f.name);
+    let b = buckets.find(x => x.key === key);
+    if (!b) { b = { key: key, group: g, files: [] }; buckets.push(b); }
+    b.files.push(f);
+  });
+
+  let made = 0;
+  for (let bi = 0; bi < buckets.length; bi++) {
+    const b = buckets[bi];
+    const tag = buckets.length > 1 ? '（' + (bi + 1) + '/' + buckets.length + '）' : '';
+    const audios = b.files.filter(f => AUDIO_EXT.test(extOf(f.name)));
+    const docs = b.files.filter(f => !AUDIO_EXT.test(extOf(f.name)));
     try {
-      importNote(tag + ' 正在读 ' + f.name + '…');
-      const r = await readImportFile(f);
-      if (r.ok) { chats.push(r.text); continue; }
-      /* 扫描件 PDF：整页是图，逐页离线识别。
-         ⚠️ 站内识别只装了英文模型（使用者是要练英语的，装中文模型要多背十几兆）。
-            中文扫描件会识别不出来，这里要如实说明，别让人以为是坏了。 */
-      if (r.pdfImages) {
-        const pages = r.pdfImages.slice(0, 10);
-        let got = 0;
-        /* 先单独把引擎拉一次：拉不起来就一次性说清原因（多半是在单文件版里），
-           不要每页都报一遍"识别失败"。 */
-        try {
-          await loadOcrLib();
-        } catch (e) {
-          problems.push(f.name + '：这是扫描件（整页是图），要靠文字识别才能读，'
-            + '但 ' + ocrWhyUnavailable(e)
-            + ' 两个办法：把每页截图后用手机相册／微信的「提取文字」，'
-            + '或者改用浏览器里的在线版再传这个 PDF。');
-          continue;
-        }
-        for (let k = 0; k < pages.length; k++) {
-          try {
-            const d = await ocrImage(pages[k], m => importNote(tag + ' 识别第 ' + (k + 1)
-              + '/' + pages.length + ' 页：' + m.status
-              + (m.progress ? ' ' + Math.round(m.progress * 100) + '%' : '')));
-            const v = ocrVerdict(d);
-            if (v.ok) { chats.push(v.text); got++; }
-            else problems.push(f.name + ' 第 ' + (k + 1) + ' 页：' + v.why + '，这一页跳过了。');
-          } catch (e) {
-            problems.push(f.name + '：第 ' + (k + 1) + ' 页识别失败（' + e.message + '），后面的跳过了。');
-            break;
-          }
-        }
-        problems.push(got
-          ? f.name + '：这是扫描件，我按图片识别了 ' + got + '/' + pages.length
-            + ' 页 —— 识别难免有错字，导进来之后做一遍题就能看出来。'
-          : f.name + '：这是扫描件，但站内识别只装了英文模型，'
-            + '里面没读出可用的英文（中文扫描件请用手机相册／微信的「提取文字」转成文字再粘进来）。');
+      /* 读这一组里的所有文档 */
+      const read = [];
+      for (const f of docs) {
+        importNote(tag + ' 正在读 ' + f.name + '…');
+        const t = await readOneImport(f, tag, problems, notes);
+        if (t) read.push({ f: f, text: t });
+      }
+      if (!read.length && !audios.length) continue;
+      if (!read.length) {
+        /* 只有音频没有卷子 —— 先存着，等卷子来了再配 */
+        await attachAudioFiles(audios, [], problems, notes);
         continue;
       }
-      if (r.image) {
-        try {
-          const d = await ocrImage(f, m => importNote(tag + ' 识别中：' + m.status
-            + (m.progress ? ' ' + Math.round(m.progress * 100) + '%' : '')));
-          const v = ocrVerdict(d);
-          if (v.ok) chats.push(v.text);
-          else problems.push(f.name + '：这张图我读不清 —— ' + v.why
-            + '。请重拍（正对、光线足、一页一张），或者用手机相册／微信的「提取文字」'
-            + '把文字弄出来粘到下面。');
-        } catch (e) {
-          problems.push(f.name + '：' + ocrWhyUnavailable(e)
-            + ' 请用手机相册／微信的「提取文字」把文字取出来，粘到下面；'
-            + '或者改用浏览器里的在线版（那里带了识别引擎）再传这张图。');
+      /* 分"试卷本体"和"答案解析" */
+      let mains = read.filter(x => !isAnswerFile(x.f.name));
+      if (!mains.length) mains = read;
+      const ansFiles = read.filter(x => isAnswerFile(x.f.name) && mains.indexOf(x) < 0);
+
+      const mainText = mains.map(x => x.text).join('\n\n');
+      const name = paperNameOf(b, mains);
+      const res = parseMyBankInput(mainText);
+      if (!res.ok) {
+        if (res.mismatch) {
+          problems.push(name + '：' + res.mismatch.map(m2 => m2.name + '（' + examShort()
+            + '不考它，考它的是 ' + m2.exams.join('、') + '）').join('；')
+            + ' —— 这一份没有导入。');
+        } else {
+          problems.push(name + '：' + (res.msg || '没解析出题目。')
+            + (res.unknown && res.unknown.length
+              ? ' 有分节没认出来：' + res.unknown.join('、') : ''));
         }
         continue;
       }
-      problems.push(f.name + '：' + r.msg);
+
+      /* 答案解析并进题目 */
+      if (ansFiles.length) {
+        let filled = 0;
+        ansFiles.forEach(x => { filled += applyAnswerKey(res.types, x.text); });
+        if (filled) {
+          notes.push('「' + name + '」的答案/解析已合并（补上 ' + filled + ' 处答案）。');
+        } else {
+          problems.push('「' + name + '」里那份答案/解析没能合并进去（写法对不上）——'
+            + '题目照常可以用，答案要自己做题时看。');
+        }
+      }
+
+      const paper = savePaper(b.key, name, res.types, {
+        marks: parseImportMarks(mainText, res.types),
+        audio: [],
+      });
+      paper.group = b.group;
+      if (res.guessed && res.guessed.length) {
+        notes.push('「' + name + '」没写分节标题，按内容判成了 ' + res.guessed.join('、') + '。');
+      }
+      (res.notes || []).forEach(x => notes.push('「' + name + '」' + x));
+      const issues = diagnoseTypes(res.types);
+      issues.forEach(it => problems.push('「' + name + '」' + it.where + '：' + it.bad.join('；')));
+      const p = myPapers().find(x => x.id === paper.id);
+      p.group = b.group;
+
+      /* 音频配到这张卷子上 */
+      if (audios.length) await attachAudioFiles(audios, [p], problems, notes);
+
+      /* 有听力题、却一段音频都没有 —— 专门提醒（题目照收） */
+      if (papersMissingAudio(myPapers().find(x => x.id === paper.id))) {
+        problems.push('「' + name + '」有听力题，但这个文件夹里没找到音频 ——'
+          + '题目已经导进来了，补上音频就能听。');
+      }
+      made++;
     } catch (e) {
-      problems.push(f.name + '：读这个文件出错了 —— ' + e.message);
+      problems.push((b.group || b.key) + '：处理这一组时出错 —— ' + e.message);
     }
   }
   importNote('');
-  if (!chats.length) {
-    importReport = { ok: false, problems,
-      msg: problems.length ? '这些文件都没能读出文字。' : '没有可读的内容。' };
-    render();
-    return;
-  }
-  const text = chats.join('\n\n');
-  const ta = $('#mytext');
-  if (ta) ta.value = text;
-  const r = importMyBank(text);          // importMyBank 里会 render()
-  importReport = Object.assign({}, r, { problems, fileText: text });
+  savePapers(myPapers());
+  rebuildBank();
+
+  importReport = {
+    ok: made > 0, made: made, paperCount: myPapers().length,
+    types: made ? '导入了 ' + made + ' 张卷子' : '',
+    issues: [], problems: problems, notes: notes,
+    unknown: [], guessed: [],
+    msg: made ? '' : (problems.length ? '这些文件都没能读出题目。' : '没有可读的内容。'),
+  };
   render();
+  toast(made ? ('导入了 ' + made + ' 张卷子') : ('没能导入：' + (problems[0] || '').slice(0, 40)));
+}
+
+/* 音频：先存进 IndexedDB，再按"同组 / 名字对得上"挂到卷子上。
+   挂不上的进待配池（在「我的题目」里能手动挑一张卷子配上去）。 */
+async function attachAudioFiles(files, madePapers, problems, notes) {
+  const all = myPapers();
+  const pool = pendingAudio();
+  for (const f of files) {
+    const g = groupOf(f);
+    const base = baseNameOf(f.name);
+    let target = null;
+    if (g) target = madePapers.find(p => p.group === g)
+      || all.find(p => p.group && p.group === g);
+    if (!target && base) {
+      target = all.find(p => p.name && (p.name === base
+        || p.name.indexOf(base) === 0 || base.indexOf(p.name) === 0));
+    }
+    if (!target && madePapers.length === 1 && !g) target = madePapers[0];
+    const a = {
+      id: 'a' + Date.now().toString(36) + '-' + Math.round(Math.random() * 1e4),
+      name: f.name, size: f.size,
+    };
+    try { await idbPut(a.id, f); a.stored = true; }
+    catch (e) {
+      a.stored = false;
+      problems.push(f.name + '：这段音频没能存进浏览器（' + (e && e.message) + '）——'
+        + '刷新页面后就没了。放到能联网的地址（GitHub Pages 那种）上再用会正常。');
+    }
+    if (target) {
+      target.audio = (target.audio || []).concat([a]);
+      notes.push('音频「' + f.name + '」配到了「' + target.name + '」上。');
+      /* 把音频挂到这份卷子的听力题上，播放按钮就能用它 */
+      (target.types || []).forEach(t => {
+        if (t.type !== 'listening') return;
+        const ids = (target.audio || []).map(x => x.id);
+        (t.items || []).forEach((it, k) => { it.audio = ids[Math.min(k, ids.length - 1)]; });
+      });
+    } else {
+      pool.push({ exam: curExam().id, name: f.name, id: a.id, size: f.size });
+      problems.push('音频「' + f.name + '」没找到对应的卷子 —— 已经存下来，'
+        + '在「我的题目」里可以手动挑一张卷子配上去。'
+        + '（把音频和卷子放进同一个文件夹里一起拖进来，就能自动对上。）');
+    }
+  }
+  savePapers(all);
+  LS.set(pendAudioKey(), pool);
+}
+
+function pendAudioKey() { return 'audiopool:' + curExam().id; }
+function pendingAudio() { return LS.get(pendAudioKey(), []) || []; }
+
+/* ==========================================================================
+   音频放在 IndexedDB 里
+   --------------------------------------------------------------------------
+   为什么不用 localStorage：它一共才 5MB，而且只能存字符串。
+   一段听力录音就几兆，塞不进去。IndexedDB 是浏览器自带的本地数据库，
+   能直接存 Blob，容量按站点配额走（通常几百兆）。
+   ⚠️ 单文件版 / file:// 下 IndexedDB 可能不可用 → 降级为"这次能听，刷新就没了"，
+      并把这件事明确告诉使用者，别让人以为存住了。
+   ========================================================================== */
+function idbOpen() {
+  return new Promise((res, rej) => {
+    try {
+      if (typeof indexedDB === 'undefined') return rej(new Error('这个环境没有 IndexedDB'));
+      const rq = indexedDB.open('cet4lab', 1);
+      rq.onupgradeneeded = () => {
+        const db = rq.result;
+        if (!db.objectStoreNames.contains('audio')) db.createObjectStore('audio');
+      };
+      rq.onsuccess = () => res(rq.result);
+      rq.onerror = () => rej(rq.error || new Error('打不开本地数据库'));
+    } catch (e) { rej(e); }
+  });
+}
+async function idbPut(key, blob) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('audio', 'readwrite');
+    tx.objectStore('audio').put(blob, key);
+    tx.oncomplete = () => res(true);
+    tx.onerror = () => rej(tx.error);
+  });
+}
+async function idbGet(key) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('audio', 'readonly');
+    const rq = tx.objectStore('audio').get(key);
+    rq.onsuccess = () => res(rq.result || null);
+    rq.onerror = () => rej(rq.error);
+  });
+}
+
+/* 播放一段配好的音频。对象 URL 缓存起来，别每点一次就新建一个。 */
+const audioUrls = {};
+let curAudioEl = null;
+async function playPaperAudio(aid) {
+  try {
+    if (!audioUrls[aid]) {
+      const blob = await idbGet(aid);
+      if (!blob) { toast('这段音频没存住（换用在线地址再导一次就好）'); return; }
+      audioUrls[aid] = URL.createObjectURL(blob);
+    }
+    if (curAudioEl) { curAudioEl.pause(); curAudioEl = null; }
+    const el = new Audio(audioUrls[aid]);
+    curAudioEl = el;
+    el.play().catch(() => toast('浏览器挡住了自动播放，再点一下播放键'));
+  } catch (e) {
+    toast('放不出来：' + (e && e.message));
+  }
 }
 
 /* 顶部的一行状态（读取/识别进度）。没状态时就藏起来。 */
@@ -2954,10 +3538,31 @@ function parseMyBankInput(text) {
     try { obj = JSON.parse(s); } catch (e) { return { ok: false, msg: 'JSON 格式有错：' + e.message }; }
     if (Array.isArray(obj)) return { ok: false, msg: '这像是一个数组，请用本站导出的完整文件（含 types 字段）' };
     if (!obj || !Array.isArray(obj.types)) return { ok: false, msg: 'JSON 里没有 types 字段，不是本站导出的格式' };
-    const types = obj.types.map(t => ({
+    const clean = t => ({
       type: t.type, typeName: (QTYPES[t.type] || {}).name || t.typeName || t.type,
       items: (t.items || []).map(i => Object.assign({}, i, { origin: 'mine' })),
-    })).filter(t => t.items.length);
+    }).items.length ? {
+      type: t.type, typeName: (QTYPES[t.type] || {}).name || t.typeName || t.type,
+      items: (t.items || []).map(i => Object.assign({}, i, { origin: 'mine' })),
+    } : null;
+    /* 新格式：一叠试卷，原样恢复（名字、分值都留着） */
+    if (Array.isArray(obj.papers)) {
+      const list = [];
+      obj.papers.forEach(pp => {
+        const ts = (pp.types || []).map(clean).filter(Boolean);
+        if (!ts.length) return;
+        list.push({ key: pp.key || pp.src || ('导出-' + (pp.name || '试卷')),
+                    name: pp.name || '导出的试卷', marks: pp.marks || {}, types: ts });
+      });
+      if (!list.length) return { ok: false, msg: '导出的文件里没有题目' };
+      const badP = [];
+      list.forEach(pp => checkExamFit(pp.types).forEach(x => badP.push(x)));
+      if (badP.length) return { ok: false, mismatch: badP };
+      return { ok: true, papers: list, types: [], unknown: [], guessed: [],
+               notes: [], issues: [] };
+    }
+    /* 老格式：只有一坨 types —— 当成一张卷子 */
+    const types = (obj.types || []).map(clean).filter(Boolean);
     if (!types.length) return { ok: false, msg: 'JSON 里没有任何题目' };
     const badJ = checkExamFit(types);
     if (badJ.length) return { ok: false, mismatch: badJ };
@@ -2982,14 +3587,12 @@ function parseMyBankInput(text) {
            notes: parsed.notes, issues: diagnoseTypes(types) };
 }
 
-/* 把「我的题目」合并进当前题库（重建，避免重复叠加） */
 /* 把「自备材料」和「我的题目」并进当前题库。
    ⚠️ 用**重建**而不是追加，避免重复调用时越叠越多。
-   ⚠️ 还要看练习范围：mine 模式下站内自带的一律不要，
-      只留我自己导的题 —— 不然"我的题目"里还是混着一堆站里的题。 */
+   ⚠️ 只放**当前选中的那几张试卷** —— 进度、统分、题库全跟着走，
+      这就是"选择我的题目"这个功能的意义。 */
 function rebuildBank() {
   if (!S.base) return;
-  const mineOnly = curScope() === 'mine';
   const clone = JSON.parse(JSON.stringify(S.base));
   const mineListen = [], localListen = [];
   const add = (types, listenBox) => {
@@ -3001,79 +3604,191 @@ function rebuildBank() {
       else clone.types.push(t);
     }
   };
-  if (mineOnly) {
-    // 先把站内自带的清空，再把我自己的加进去
-    clone.types.forEach(t => { t.items = (t.items || []).filter(x => x.origin === 'mine'); });
-    clone.types = clone.types.filter(t => t.items.length);
-  } else {
-    add(S.localTypes, localListen);      // 站里带的「自备材料」
-  }
-  add(myBankTypes(), mineListen);
+  add(S.localTypes, localListen);        // 站里带的「自备材料」
+  add(myBankTypes(), mineListen);        // 我的题目（当前选中的试卷）
   S.bank = clone;
-  S.bank.hasLocal = mineOnly ? 0 : (S.localCount || 0);
+  S.bank.hasLocal = S.localCount || 0;
   S.bank.hasMine = myBankCount();
   S.myListenCount = mineListen.length;
   if (S.baseListen) {
-    const baseItems = mineOnly ? [] : (S.baseListen.items || []);
     S.listen = { note: S.baseListen.note,
-                 items: mineListen.concat(localListen, baseItems) };
+                 items: mineListen.concat(localListen, S.baseListen.items || []) };
   }
 }
 
-function importMyBank(text) {
+/* 把一份解析结果收成一张试卷。
+   ⚠️ 同一份文件（src 相同）再导一次 = **更新那张试卷**，不是又加一张；
+      使用者改过的名字要保留，别被文件名覆盖回去。 */
+/* 收成一张试卷。
+   key  = 去重键（文件夹路径，或散文件的文件名）—— 同一个 key 再导一次就是**更新**那张卷子
+   name = 显示名，默认取文件夹名/文件名，使用者之后可以在页面里改
+   ⚠️ 使用者改过的名字要留住，别被文件名覆盖回去。 */
+function savePaper(key, name, types, extra) {
+  const list = myPapers();
+  const ex = extra || {};
+  let p = list.find(x => x.src === key);
+  if (p) {
+    p.types = types;
+    p.marks = ex.marks || {};
+  } else {
+    p = {
+      id: 'p' + Date.now().toString(36) + '-' + (list.length + 1),
+      name: String(name || '未命名试卷').slice(0, 60),
+      src: key, addedAt: today(),
+      types: types, marks: ex.marks || {}, audio: [],
+    };
+    list.push(p);
+  }
+  p.audio = (p.audio || []).concat(ex.audio || []);
+  savePapers(list);
+  return p;
+}
+function renamePaper(id, name) {
+  const list = myPapers();
+  const p = list.find(x => x.id === id);
+  if (!p) return;
+  const t = String(name || '').trim();
+  if (t) p.name = t.slice(0, 60);
+  savePapers(list);
+}
+function removePaper(id) {
+  savePapers(myPapers().filter(p => p.id !== id));
+  if (activePaperId() === id) LS.set(activePaperKey(), '');
+}
+
+/* 导出成能再导入回来的 JSON。
+   ⚠️ 一定要带 paperKey：不然导出再导入会**又多出一张一模一样的卷子**。 */
+function myBankExportJson() {
+  const ps = myPapers();
+  /* ⚠️ 一定要**按试卷分别导出**，不要把几份合并成一大坨 ——
+     合并导出再导入会越导越多（每导一次就把别人的题也算进自己这张卷子里）。 */
+  return JSON.stringify({
+    version: today(), exportedAt: new Date().toISOString(), exam: curExam().id,
+    note: '英语备考训练台 · 我的题目（' + examShort()
+      + '）。在「我的 → 导入试卷」里粘贴或选这个文件即可。',
+    papers: ps.map(x => ({
+      key: x.src || x.id, name: x.name, marks: x.marks || {}, types: x.types,
+    })),
+    types: myBankTypes(),          // 兼容老版本（只认 types 的那种）
+  }, null, 1);
+}
+
+/* 粘贴导入没有文件名，用它内容的指纹当去重键：
+   同一段文本再粘一次 = 更新那张卷子；不同文本 = 新的一张。
+   （固定键的话，第二次粘贴会把第一次的卷子整张覆盖掉。） */
+function textKey(s) {
+  let h = 5381;
+  const t = String(s || '');
+  for (let i = 0; i < t.length; i++) h = (((h * 33) >>> 0) ^ t.charCodeAt(i)) >>> 0;
+  return 'paste:' + h.toString(36);
+}
+
+/* 手动粘贴导入：把这一份文本收成一张试卷（名字之后可以改） */
+function importMyBank(text, srcName, extra) {
   const r = parseMyBankInput(text);
   if (!r.ok) return r;
-  const m = mergeMyBank(r.types);
+  const ex0 = extra || {};
+  /* 一叠试卷（导入别人导出的文件）→ 原样恢复每一张 */
+  if (r.papers) {
+    r.papers.forEach(pp => savePaper(pp.key, pp.name, pp.types, { marks: pp.marks }));
+    rebuildBank();
+    if (!ex0.__silent) render();
+    return { ok: true, n: r.papers.reduce((a, pp) => a + pp.types.reduce((x, t) => x + t.items.length, 0), 0),
+             types: '恢复了 ' + r.papers.length + ' 张卷子', unknown: [], issues: [],
+             guessed: [], notes: [], papers: r.papers.length,
+             paperCount: myPapers().length };
+  }
   const parts = r.types.map(t => {
     const meta = myTypeMeta(t.type);
     return meta.name + ' ' + t.items.length + meta.unit;
   });
   const total = r.types.reduce((a, t) => a + t.items.length, 0);
-  LS.set(myBankKey(), { version: today(), exam: curExam().id, types: m.types });
-  rebuildBank();
-  render();
-  return { ok: true, n: total, added: m.added, dup: m.dup,
-           types: parts.join('、'), unknown: r.unknown || [],
-           issues: r.issues || [], guessed: r.guessed || [], notes: r.notes || [] };
-}
-
-/* 导入是**追加**，不是覆盖 ——
-   ⚠️ 踩过：原来整份替换。用户先导了四级阅读，隔天补导听力，
-      一点"导入"，前一天的阅读就没了。而"先导一部分、之后再补"
-      恰恰是最常见的用法（用户原话：「有可能人家只是加部分四级练习题，
-      比如漏了听力」）。
-   去重按**内容指纹**：同一份文件再导一次不会变成两份，
-   改了内容再导才会作为新题加进来。 */
-function itemFingerprint(it) {
-  const c = Object.assign({}, it);
-  delete c.id; delete c.origin;
-  return JSON.stringify(c);
-}
-function mergeMyBank(newTypes) {
-  const prev = myBankTypes();
-  const out = prev.map(t => ({ type: t.type, typeName: t.typeName, items: (t.items || []).slice() }));
-  const seen = {};
-  out.forEach(t => (t.items || []).forEach(it => { seen[t.type + '|' + itemFingerprint(it)] = 1; }));
-  let added = 0, dup = 0;
-  newTypes.forEach(t => {
-    let slot = out.find(x => x.type === t.type);
-    if (!slot) {
-      slot = { type: t.type, typeName: t.typeName, items: [] };
-      out.push(slot);
+  const ex = extra || {};
+  let key = srcName;
+  if (!key) {
+    const t0 = String(text || '').trim();
+    if (t0[0] === '{') {
+      try { const o = JSON.parse(t0); if (o && o.paperKey) key = o.paperKey; } catch (e) { /* 忽略 */ }
     }
-    (t.items || []).forEach(it => {
-      const k = t.type + '|' + itemFingerprint(it);
-      if (seen[k]) { dup++; return; }
-      seen[k] = 1;
-      slot.items.push(it);
-      added++;
-    });
-  });
-  return { types: out.filter(t => t.items.length), added, dup };
+  }
+  if (!key) key = textKey(text);
+  const p = savePaper(key, String(key).replace(/\.[^.]+$/, ''), r.types,
+    { marks: ex.marks || parseImportMarks(text, r.types), audio: ex.audio });
+  rebuildBank();
+  if (!ex.__silent) render();
+  return { ok: true, n: total,
+           types: parts.join('、'), unknown: r.unknown || [],
+           issues: r.issues || [], guessed: r.guessed || [], notes: r.notes || [],
+           paper: p, paperCount: myPapers().length };
 }
 
-/* ---------- 我的 ---------- */
+/* 统分单位：选词/填空按"空"，听写按"句"，其余按"题" */
+function scoreUnit(type) {
+  if (type === 'cloze' || type === 'gap') return '空';
+  if (type === 'listen') return '句';
+  return '题';
+}
+/* 这张卷子的分值说明：**卷子上标了就按标的**，没标才用考试标准。
+   使用者要的就是"比如这一个空多少分"能看见。 */
+function paperScoreHtml(p) {
+  const out = [];
+  (p.types || []).forEach(t => {
+    if (OPEN_TYPES.indexOf(t.type) >= 0) return;
+    const own = p.marks && p.marks[t.type];
+    const per = own || scorePerQOf(t.type);
+    if (!per) return;
+    out.push(esc(myTypeMeta(t.type).name) + ' 每' + scoreUnit(t.type)
+      + ' <b>' + (+per.toFixed(2)) + '</b> 分'
+      + (own ? '<span style="color:var(--brand)">（卷子上标的）</span>'
+             : '（按' + esc(examShort()) + '标准）'));
+  });
+  return out.length ? `<div class="meta" style="margin-top:2px">${out.join('　')}</div>` : '';
+}
+/* 有听力题却一份音频都没配 —— 题目照收，但要说一声 */
+function papersMissingAudio(p) {
+  const hasListen = (p.types || []).some(t => t.type === 'listening');
+  return hasListen && !(p.audio || []).length;
+}
 
+function papersListHtml() {
+  const list = myPapers();
+  if (!list.length) {
+    return `<div class="meta">把卷子导进来就能练，还能按考试标准算分。
+      导入的内容只归「${esc(examShort())}」这场考试。</div>`;
+  }
+  const cur = activePaperId();
+  let h = `<div class="meta" style="margin-bottom:8px">
+    「${esc(examShort())}」共 <b>${list.length}</b> 张卷子 · `
+    + (cur ? '现在只练选中的那一张' : '<b>全部一起练</b>（点一张就只练它）') + '</div>';
+  list.forEach(p => {
+    const on = cur === p.id;
+    const stat = (p.types || []).map(t => {
+      const m = myTypeMeta(t.type);
+      return m.name + ' ' + (t.items || []).length + m.unit;
+    }).join(' · ');
+    const units = (p.types || []).reduce((a, t) => a + unitCountOf(t.type, t.items), 0);
+    h += `<div class="paper${on ? ' on' : ''}">
+      <div class="row" style="margin:0;gap:6px;align-items:center">
+        <input class="papername" data-paperrename="${p.id}" value="${esc(p.name)}"
+          maxlength="60" title="直接点这里就能改卷子名">
+        ${on ? '<span class="tag" style="background:var(--brand-soft);color:var(--brand);'
+          + 'border-color:transparent">正在练</span>' : ''}
+      </div>
+      <div class="meta" style="margin:6px 0 0">${esc(stat) || '（没有题目）'} · 共 ${units} ${scoreUnit('careful')}</div>
+      ${paperScoreHtml(p)}
+      ${papersMissingAudio(p) ? `<div class="meta" style="margin-top:4px;color:var(--warn)">
+        这份卷子有听力题，但没配上音频 —— 题目能照常练，只是听不到声音。</div>` : ''}
+      ${(p.audio || []).length ? `<div class="meta" style="margin-top:2px">
+        配上音频 ${p.audio.length} 段：${esc(p.audio.map(a => a.name).join('、'))}</div>` : ''}
+      <div class="row" style="margin:8px 0 0;gap:6px">
+        <button class="btn ${on ? 'ghost' : ''} sm" data-paperuse="${p.id}">${
+          on ? '改回全部一起练' : '只练这一张'}</button>
+        <button class="btn ghost sm" data-paperdel="${p.id}">删掉</button>
+      </div>
+    </div>`;
+  });
+  return h;
+}
 
 function vMe() {
   const total = stats.ans, acc = total ? Math.round(stats.right / total * 100) : 0;
@@ -3093,13 +3808,10 @@ function vMe() {
 
   <div class="sec">我的题目</div>
   <div class="card tight">
-    ${(myBankCount() || myListenCount())
-      ? `<div class="meta">「${esc(examShort())}」已导入 <b>${myBankCount()}</b> 篇${
-          myListenCount() ? ' · <b>' + myListenCount() + '</b> 句听力' : ''}，排在每类最前面。</div>`
-      : `<div class="meta">导入的内容只归「${esc(examShort())}」这场考试。</div>`}
-    <div class="row">
-      <button class="btn ghost sm" data-mytoggle="1">导入我的题目</button>
-      ${(myBankCount() || myListenCount()) ? `<button class="btn ghost sm" data-myexport="1">导出（可以传给别人）</button>
+    ${papersListHtml()}
+    <div class="row" style="margin-top:10px">
+      <button class="btn ghost sm" data-mytoggle="1">导入试卷</button>
+      ${myPapers().length ? `<button class="btn ghost sm" data-myexport="1">导出（可以传给别人）</button>
       <button class="btn ghost sm" data-myclear="1">清空</button>` : ''}
     </div>
     <div id="mypanel"${myPanelOpen ? ' style="display:block"' : ' style="display:none"'}>
@@ -3252,15 +3964,6 @@ document.addEventListener('click', e => {
   const g = e.target.closest('[data-go]'); if (g) { go(g.dataset.go); return; }
 });
 
-/* 练习范围开关：整套卷子 / 我的题目 */
-document.addEventListener('click', e => {
-  const s = e.target.closest('[data-scope]');
-  if (!s) return;
-  setScope(s.dataset.scope);
-  toast(s.dataset.scope === 'mine'
-    ? '只练我自己导入的题目' : '按整套卷子的标准来');
-});
-
 /* 题型页：选项 / 提交 / 下一题 / 重做 */
 document.addEventListener('click', e => {
   if (route.indexOf('type:') !== 0) return;
@@ -3306,7 +4009,8 @@ document.addEventListener('click', e => {
   // 听力理解的播放按钮（读这条题目的 script）
   if (e.target.closest('[data-playq]')) {
     const it2 = t.items[i];
-    if (it2.script) speak(it2.script); else toast('这条题目没有听力材料');
+    if (it2.audio) { playPaperAudio(it2.audio); return; }   // 优先放试卷自带的录音
+    if (it2.script) speak(it2.script); else toast('这条题目没有配音频，也没有原文');
     return;
   }
 
@@ -3404,6 +4108,16 @@ document.addEventListener('change', e => {
    全程在本机完成，不上传。
    拖到页面**任何地方**都收：浏览器默认会把拖进来的文件直接打开（离开本站），
    与其那样不如接住 —— 顺手把「我的题目」面板打开，让人看见东西去哪了。 */
+/* 改卷子名：输入框就在列表里，失焦或回车就存 —— 不弹文件管理器、也不弹输入框 */
+document.addEventListener('change', e => {
+  const el = e.target && e.target.closest && e.target.closest('[data-paperrename]');
+  if (el) {
+    renamePaper(el.dataset.paperrename, el.value);
+    render();
+    toast('已改名为「' + el.value.trim() + '」');
+  }
+});
+
 document.addEventListener('change', e => {
   if (e.target && e.target.id === 'myfile') {
     const fs = e.target.files;
@@ -3687,7 +4401,7 @@ document.addEventListener('click', e => {
   }
   if (e.target.closest('[data-myimport]')) {
     const ta = $('#mytext');
-    const r = importMyBank(ta ? ta.value : '');
+    const r = importMyBank(ta ? ta.value : '', '粘贴导入的题目');
     importReport = r;                    // 详情在面板里显示，toast 只说一句话
     render();
     if (r.mismatch) {
@@ -3700,17 +4414,33 @@ document.addEventListener('click', e => {
     return;
   }
   if (e.target.closest('[data-myexport]')) {
-    download(JSON.stringify({
-      version: today(), exportedAt: new Date().toISOString(), exam: curExam().id,
-      note: '英语备考训练台 · 我的题目（' + examShort() + '）。在「我的 → 导入我的题目」里粘贴或选这个文件即可。',
-      types: myBankTypes(),
-    }, null, 1), '我的题目_' + examShort() + '.json', 'application/json');
+    download(myBankExportJson(), '我的题目_' + examShort() + '.json', 'application/json');
     return;
   }
   if (e.target.closest('[data-myclear]')) {
-    if (confirm('清空「' + examShort() + '」下自己导入的题目？（其它考试和其它数据不受影响）')) {
-      LS.set(myBankKey(), null); rebuildBank(); render();
-      toast('已清空这场考试的我的题目');
+    if (confirm('清空「' + examShort() + '」下自己导入的卷子？（其它考试和其它数据不受影响）')) {
+      savePapers([]);
+      LS.set(activePaperKey(), '');
+      rebuildBank(); render();
+      toast('已清空这场考试的卷子');
+    }
+    return;
+  }
+  /* 只练这一张 / 改回全部一起练 */
+  if (e.target.closest('[data-paperuse]')) {
+    const id = e.target.closest('[data-paperuse]').dataset.paperuse;
+    setActivePaper(activePaperId() === id ? '' : id);
+    const p = activePaper();
+    toast(p ? '只练「' + p.name + '」' : '改回全部一起练');
+    return;
+  }
+  if (e.target.closest('[data-paperdel]')) {
+    const id = e.target.closest('[data-paperdel]').dataset.paperdel;
+    const p = myPapers().find(x => x.id === id);
+    if (p && confirm('删掉「' + p.name + '」这张卷子？（其它卷子不受影响）')) {
+      removePaper(id);
+      rebuildBank(); render();
+      toast('已删掉这张卷子');
     }
     return;
   }
