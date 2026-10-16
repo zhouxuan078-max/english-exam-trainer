@@ -3305,7 +3305,17 @@ function baseNameOf(s) {
 
 /* 读一个文件 → 文字。读不出来的地方都记进 problems / notes。 */
 async function readOneImport(f, tag, problems, notes) {
-  const r = await readImportFile(f);
+  let r;
+  try {
+    r = await readImportFile(f);
+  } catch (e) {
+    const m = String((e && e.message) || '');
+    problems.push(/could not be found|NotFound/i.test(m)
+      ? f.name + '：这看起来是**文件夹**，不是文件。把整个文件夹拖进来，'
+        + '或者点「选文件夹」把文件夹选进来（里面放试卷、答案解析、听力三样）。'
+      : f.name + '：读不了 —— ' + m);
+    return null;
+  }
   if (r.ok) return r.text;
   /* 扫描件 PDF：整页是图，逐页离线识别。
      ⚠️ 站内识别只装了英文模型（使用者是要练英语的，装中文要多背十几兆）。
@@ -4138,13 +4148,19 @@ function vMe() {
     </div>
     <div id="mypanel"${myPanelOpen ? ' style="display:block"' : ' style="display:none"'}>
       <div id="mydrop" class="drop">
-        <div><b>把试卷文件拖到这里</b>，或者</div>
-        <label class="btn ghost sm" style="cursor:pointer;margin-top:6px">
-          选文件
-          <input type="file" id="myfile" multiple
-            accept=".txt,.md,.csv,.tsv,.json,.docx,.pptx,.xlsx,.pdf,image/*"
-            style="display:none">
-        </label>
+        <div><b>把整份试卷的文件夹拖到这里</b>，或者</div>
+        <div class="row" style="margin:6px 0 0;gap:6px">
+          <label class="btn ghost sm" style="cursor:pointer">
+            选文件夹
+            <input type="file" id="mydir" webkitdirectory directory multiple style="display:none">
+          </label>
+          <label class="btn ghost sm" style="cursor:pointer">
+            选文件
+            <input type="file" id="myfile" multiple
+              accept=".txt,.md,.csv,.tsv,.json,.docx,.pptx,.xlsx,.pdf,image/*"
+              style="display:none">
+          </label>
+        </div>
         <div class="meta" style="margin-top:6px">
           文档 / 表格 / 图片都行，一次可以选好几个。全部在本机读，
           <b>不上传、不联网</b>。
@@ -4441,12 +4457,13 @@ document.addEventListener('change', e => {
 });
 
 document.addEventListener('change', e => {
-  if (e.target && e.target.id === 'myfile') {
-    const fs = e.target.files;
-    if (fs && fs.length) {
-      importReport = null;
-      handleImportFiles(fs);
-    }
+  const id = e.target && e.target.id;
+  if (id !== 'myfile' && id !== 'mydir') return;
+  const fs = e.target.files;
+  if (fs && fs.length) {
+    importReport = null;
+    handleImportFiles(fs);        // 选文件夹时每个文件自带 webkitRelativePath
+    try { e.target.value = ''; } catch (e2) { /* 允许再选同一个文件夹 */ }
   }
 });
 ['dragenter', 'dragover'].forEach(ev => document.addEventListener(ev, e => {
@@ -4459,16 +4476,61 @@ document.addEventListener('change', e => {
   if (!e.dataTransfer) return;
   const d = e.target.closest && e.target.closest('#mydrop');
   if (d) d.classList.remove('over');
-  if (!e.dataTransfer.files || !e.dataTransfer.files.length) return;
   if (ev === 'dragleave') return;
   e.preventDefault();
+  /* ⚠️ webkitGetAsEntry() 必须在**事件处理里同步调用** ——
+     等一拍再调，DataTransferItem 就失效了，什么都拿不到。 */
+  const entries = e.dataTransfer.items
+    ? Array.prototype.slice.call(e.dataTransfer.items)
+      .map(it => (it.webkitGetAsEntry ? it.webkitGetAsEntry() : null))
+    : [];
+  const fallback = Array.prototype.slice.call(e.dataTransfer.files || []);
+  if (!entries.some(Boolean) && !fallback.length) return;
   importReport = null;
-  if (d) { handleImportFiles(e.dataTransfer.files); return; }
+  const run = async () => {
+    const files = await filesFromDataTransfer(entries, fallback);
+    if (files.length) handleImportFiles(files);
+  };
+  if (d) { run(); return; }
   // 拖在面板外面：先把「我的题目」面板打开，再导
   myPanelOpen = true;
   if (route !== 'me' && !onboarding) { route = 'me'; render(); }
-  setTimeout(() => handleImportFiles(e.dataTransfer.files), 60);
+  setTimeout(run, 60);
 }));
+
+/* 拖进来的可能是**文件夹**（使用者的素材就是一个文件夹三样东西）。
+   ⚠️ 浏览器给文件夹的只是一个"占位 File"，直接读它会报
+      "A requested file or directory could not be found at the time an
+       operation was processed" —— 之前就是这样，整组处理直接崩掉。
+   必须用 webkitGetAsEntry() 递归把里面的真文件取出来，并带上相对路径
+   （相对路径是用来判断"哪些文件属于同一张卷子"的）。 */
+async function filesFromDataTransfer(entries, fallback) {
+  if (!entries || !entries.some(Boolean)) return fallback || [];
+  const out = [];
+  const walk = async (entry, parent) => {
+    if (!entry) return;
+    if (entry.isFile) {
+      try {
+        const f = await new Promise((res, rej) => entry.file(res, rej));
+        try { Object.defineProperty(f, 'webkitRelativePath', { value: parent + f.name }); }
+        catch (e2) { /* 有的环境不让改，那就没有相对路径，按散文件处理 */ }
+        out.push(f);
+      } catch (e2) { /* 这个文件取不到，跳过 */ }
+      return;
+    }
+    if (!entry.isDirectory) return;
+    const rd = entry.createReader();
+    for (let guard = 0; guard < 200; guard++) {
+      const batch = await new Promise(res => {
+        try { rd.readEntries(res, () => res([])); } catch (e2) { res([]); }
+      });
+      if (!batch.length) break;
+      for (const e2 of batch) await walk(e2, parent + entry.name + '/');
+    }
+  };
+  for (const en of entries) await walk(en, '');
+  return out.length ? out : (fallback || []);
+}
 
 function submitRead(t, i, d) {
   const it = t.items[i];
