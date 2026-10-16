@@ -470,6 +470,32 @@ function migrateExamCfg() {
   }
 }
 
+/* 答题记录的键原来少一层：ans:<考试>:<题型>:<第几题>。
+   现在多了"哪张卷子"（答案见 ansKey），因为站里自带了 30 套真题之后，
+   "第 3 篇仔细阅读"在不同卷子里是**两道不同的题**。
+   这里把老键补上卷子 id —— 不然做过的东西全变回"没做过"。
+   ⚠️ 认得出是"老键"才动：段数 === 4，且第三段是个已知题型名。 */
+function migrateAnsKeys() {
+  if (LS.get('anskeys:migrated', false)) return;
+  try {
+    EXAMS.forEach(ex => {
+      const pid = LS.get('paper:' + ex.id, '') || '';
+      LS.keys('ans:' + ex.id + ':').concat(LS.keys('draft:' + ex.id + ':'))
+        .forEach(full => {
+          const raw = full.replace(/^cet4:/, '');
+          const seg = raw.split(':');
+          if (seg.length !== 4 || !QTYPES[seg[2]]) return;
+          const nk = 'cet4:' + seg[0] + ':' + seg[1] + ':' + (pid || 'base')
+            + ':' + seg[2] + ':' + seg[3];
+          if (localStorage.getItem(nk) != null) return;
+          localStorage.setItem(nk, localStorage.getItem(full));
+          localStorage.removeItem(full);
+        });
+    });
+  } catch (e) { /* 迁移失败不影响使用，最多是进度显示成 0 */ }
+  LS.set('anskeys:migrated', true);
+}
+
 /* 当前考试信息。日期：使用者填过就用他填的，否则用考试自带的（可能为空）。
    types / paper / total 都从试卷结构派生，不单独维护。 */
 function examInfo() {
@@ -576,7 +602,7 @@ function vExamPick() {
   </div>
 `;}
 
-const S = { bank: null, dict: null, listen: null };
+const S = { bank: null, dict: null, listen: null, builtin: null };
 const LS = {
   get(k, d) { try { const v = localStorage.getItem('cet4:' + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem('cet4:' + k, JSON.stringify(v)); } catch (e) {} },
@@ -603,10 +629,12 @@ let wrong = [];
 let marks = {};
 let vocab = [];
 let days = [];
+/* 「练到第几篇」的游标也是按卷子分的 —— 换一张卷子不该接着上一张的位置。 */
+function progKey() { return 'prog:' + curExam().id + ':' + (activePaperId() || '-'); }
 function scopeKeys() {
   const id = curExam().id;
   return { stats: 'stats:' + id, wrong: 'wrong:' + id, marks: 'marks:' + id,
-           prog: 'prog:' + id, vocab: 'vocab:' + id, days: 'days:' + id };
+           prog: progKey(), vocab: 'vocab:' + id, days: 'days:' + id };
 }
 let scopedFor = null;      // 当前内存里这几样是给哪场考试装的
 /* ⚠️ 自愈：只要发现当前考试和内存里装的那套不一致，就重新装一遍。
@@ -671,6 +699,15 @@ function listenDoneCount() { return LS.keys('lc:' + curExam().id + ':').length; 
 function scopeDoneCount(t) {
   return t === 'listen' ? listenDoneCount() : doneCountOf(t);
 }
+/* 这个题型里**已经做了几个计分单位**（交了卷的条目按它自己的单位数加）。
+   进度条的分子用它 —— 和统分用的是同一把尺子。 */
+function scopeDoneUnits(t) {
+  let n = 0;
+  (t.items || []).forEach((it, i) => {
+    if (LS.get(ansKey(t.type, i), null)) n += unitCountOf(t.type, [it]);
+  });
+  return n;
+}
 
 /* 这个题型里"一个计分单位"有几项：
    仔细阅读/听力/判断/单选/数学 → 小题数；匹配 → 句子数；选词/填空 → 空位数 */
@@ -684,6 +721,17 @@ function unitCountOf(type, items) {
   });
   return n;
 }
+/* 一整张卷子的计分单位数（题 / 空 / 句）—— 「我的」页卡片上那个「共 N 题」。
+   ⚠️ 必须和进度条的分母**用同一把尺子**，否则两个数字会互相打脸。
+   踩过：听写（listen）的条目只有 {id,text}，没有 questions，
+   unitCountOf 会算成 0 —— 结果专四样卷卡片写着「共 26 题」，
+   点进去进度条分母却是 32（把 6 句听写算了进去）。
+   进度那边是 scopeProgress() 单独特判 listen 的，这里也得跟上。 */
+function paperUnitsOf(p) {
+  return (p.types || []).reduce((a, t) => a
+    + (t.type === 'listen' ? (t.items || []).length
+                           : unitCountOf(t.type, t.items)), 0);
+}
 
 /* 某个题型"每题/每空多少分"：试卷里标过就用标的，否则按考试标准 */
 function perScoreOf(type) {
@@ -693,24 +741,31 @@ function perScoreOf(type) {
 }
 /* 试卷里标了分值的题型，按整份试卷算总分 */
 function scopeProgress() {
-  /* ⚠️ 分母只算**我的题目** —— 站内自带的那点原创题不混进来。
-     使用者要的是"我导的这套卷子做了多少"，把别的东西算进来就说不清了。 */
+  /* ⚠️ 分母只算**这套卷子** —— 站内自带的那点原创题不混进来。
+     使用者要的是"我这份卷子做了多少"，把别的东西算进来就说不清了。 */
   const mine = myBankTypes();
   const types = [];
-  let total = 0, done = 0, full = 0, got = 0, right = 0, scored = false;
+  let total = 0, done = 0, full = 0, got = 0, right = 0, openFull = 0, scored = false;
   mine.forEach(t => {
     if (t.type === 'listen') return;         // 听写单独算（在 S.listen 里）
     const n = (t.items || []).length;
     if (!n) return;
     types.push(t.type);
-    total += n;
-    done += Math.min(scopeDoneCount(t.type), n);
+    /* ⚠️ 分母用**计分单位**（题 / 空 / 句），不是"几篇"。
+       踩过：按"篇"算的时候，一整份四级卷只有 7 篇 —— 进度条走一格
+       就是 14%，看着像坏了。按题算才是 57 题、满分 710。 */
+    const units = unitCountOf(t.type, t.items);
+    total += units;
+    done += Math.min(scopeDoneUnits(t), units);
     const r1 = correctCountOf(t);
     right += r1;
     const per = perScoreOf(t.type);
     if (!per) return;
+    /* 写作 / 翻译没有客观答案，判不了分 —— 计入分母会变成
+       "满分 710 但你最多只能拿 497"，所以单独列出来说明。 */
+    if (OPEN_TYPES.indexOf(t.type) >= 0) { openFull += units * per; return; }
     scored = true;
-    full += unitCountOf(t.type, t.items) * per;
+    full += units * per;
     got += r1 * per;
   });
   const ln = myListenCount();
@@ -721,18 +776,34 @@ function scopeProgress() {
   }
   const pct = total ? Math.round(done / total * 100) : 0;
   return { types: types, total: total, done: done, pct: pct, got: got, full: full,
-           right: right, scored: scored, all: total > 0 && done >= total };
+           right: right, openFull: openFull, scored: scored,
+           all: total > 0 && done >= total };
 }
 
-/* 某个题型已经做了多少条（提交过的条目才会留下 ans:<题型>:<序号>） */
-/* 答题记录的键 = 考试 + 题型 + 第几题。
+/* 某个题型已经做了多少条（提交过的条目才会留下 ans:… 这条记录） */
+/* 答题记录的键 = 考试 + 哪张卷子 + 题型 + 第几题。
    ⚠️ **必须带上考试**：题库是所有考试共用的一份，键里不带考试的话，
       在四级做过一篇、切到六级，六级的"累计"也会跟着涨。
-      用户要求"每种考试的累计要独立"，所以这里把考试 id 编进键里。 */
-function ansKey(typeId, i) { return 'ans:' + curExam().id + ':' + typeId + ':' + i; }
-function draftKey(typeId, i) { return 'draft:' + curExam().id + ':' + typeId + ':' + i; }
+      用户要求"每种考试的累计要独立"，所以这里把考试 id 编进键里。
+   ⚠️ **还必须带上卷子**：我的题目排在最前、站内自带的那点题跟在后面，
+      "第 3 篇仔细阅读"在 A 卷和 B 卷里是**两道不同的题**。
+      不区分的话，切一张卷子就会看到上一张的作答原样出现在同一位置。 */
+function itemPid(typeId, i) {
+  const bt = S.bank && S.bank.types.find(x => x.type === typeId);
+  const it = bt && bt.items && bt.items[i];
+  return (it && it.pid) || 'base';
+}
+function ansKey(typeId, i) {
+  return 'ans:' + curExam().id + ':' + itemPid(typeId, i) + ':' + typeId + ':' + i;
+}
+function draftKey(typeId, i) {
+  return 'draft:' + curExam().id + ':' + itemPid(typeId, i) + ':' + typeId + ':' + i;
+}
+/* 键里多了一层卷子 id，所以不能再用前缀数了 —— 取出来按"题型"那一段筛。
+   cet4:ans:cet4:<卷子id>:<题型>:<第几题> → split(':') 的倒数第二段是题型 */
 function doneCountOf(typeId) {
-  return LS.keys('ans:' + curExam().id + ':' + typeId + ':').length;
+  return LS.keys('ans:' + curExam().id + ':')
+    .filter(k => k.split(':').slice(-2)[0] === typeId).length;
 }
 let prog = {};                          // type -> 当前第几篇（按考试存，见 loadExamScoped）
 
@@ -1273,7 +1344,8 @@ function vHome() {
         <div class="meta" style="margin:9px 0 0">
           已做 <b>${p.done}</b> / ${p.total} 项 · <b>${p.pct}%</b>${
             p.all ? '（做完了）' : ''}</div>
-        <div class="meta" style="margin-top:4px">${scoreTxt}</div>`;
+        <div class="meta" style="margin-top:4px">${scoreTxt}${
+          p.openFull ? `　（写作 + 翻译的 ${(+p.openFull.toFixed(1))} 分不自动判分，交卷后有范文对照）` : ''}</div>`;
     })()}
   </div>`;
   })()}
@@ -1315,13 +1387,14 @@ function vTypeEmpty(id) {
     <div class="ttl">${esc(q.name || id)}</div>
     <div class="meta" style="margin-top:6px">${esc(TYPE_DESC[id] || '')}</div>
     <div class="empty">这一类的题还没有。</div>
-    <div class="row"><button class="btn" data-go="me">去「我的」导入卷子</button></div>
+    <div class="row"><button class="btn" data-go="me">去「我的」看看</button></div>
   </div>`;
 }
 
 function originTag(it) {
   if (it.origin === 'mine') return `<span class="tag" style="background:var(--brand-soft);color:var(--brand);border-color:transparent">我的题目</span>`;
   if (it.origin === 'local') return `<span class="tag" style="background:var(--brand-soft);color:var(--brand);border-color:transparent">自备材料</span>`;
+  if (it.origin === 'builtin') return `<span class="tag" style="background:var(--brand-soft);color:var(--brand);border-color:transparent">系统自带</span>`;
   return it.origin === 'open'
     ? `<span class="tag open">开源语料</span>`
     : `<span class="tag orig">原创题</span>`;
@@ -1367,8 +1440,10 @@ function vItem(t, i) {
             it.audio ? '点一下播放录音' : '没有配音频，点一下用浏览器朗读原文'}</div>
         </div>`;
       } else {
-        h += `<div class="meta" style="margin:0 0 6px;color:var(--warn)">
-          这道听力题没有配音频，也没有原文 —— 只能自己做（声音和原文都缺）。</div>`;
+        /* 没有录音也没有原文（比如 2022.09 / 2023.03 这两次补考）——
+           把原因说清楚，别让人以为是自己没导好。 */
+        h += `<div class="meta" style="margin:0 0 6px;color:var(--warn)">${
+          esc(it.audioGap || '这道听力题没有配音频，也没有原文 —— 只能自己做（声音和原文都缺）。')}</div>`;
       }
     }
     const paras = [].concat(it.passage || []);
@@ -1865,6 +1940,117 @@ POINTS:
 SAMPLE:
 Should the library stay open longer during the exam period? I believe it should.`;
 
+/* ---------- 给 AI 的提示词（一键复制，让 AI 去干"读文件"这件脏活） ----------
+   为什么要这样：使用者手上的材料是 PDF / Word / 拍照，排版千奇百怪，
+   在浏览器里硬读（这个站原来就是那么干的）永远读不全 —— 而且读错了
+   使用者也不知道错在哪。让 AI 去读、去转，人只需要核对一眼。
+   站里只保留"认格式"这一件事，那件事是确定的。
+
+   ⚠️ 这份提示词**必须和解析器严格对齐**：它教 AI 写的每个分节标题，
+      都必须是 sectionTypeOf() 真认得的。自测里有一条断言逐条核对
+      （PROMPT_TITLES 里的每个名字都要能映射到题型），改了一边忘了另一边会报红。 */
+const PROMPT_TITLES = ['仔细阅读', '长篇匹配', '选词填空', '单项选择', '判断题',
+  '听力理解', '听力听写', '写作', '翻译', '口语', '数学'];
+
+function aiPromptText() {
+  const ex = curExam();
+  const list = paperOf(ex, null).map(r => r.label).join('、');
+  return `帮我把下面这份英语试卷，转成「英语备考训练台」能直接导入的纯文本格式。
+
+【三条硬规矩】
+1. 只做转写。不要改题、不要补题、不要翻译、不要替我加解析。
+2. 忠实原文。题号、选项、答案、原文一律照抄；选项有几个就写几个，一个都不能漏。
+3. 材料里没有的就别编 —— 没有答案就不要写 ANSWER 那一行。
+
+【输出要求】
+· 一种题型一段，用 === 题型名 === 隔开（前后各两个等号，两端顶格写）。
+· 只输出这段文本本身：不要开头寒暄、不要结尾总结、不要用代码块围起来。
+· 题型名只能从下面这份清单里挑，照抄，别自己另起名字：
+  仔细阅读 / 长篇匹配 / 选词填空 / 单项选择 / 判断题 / 听力理解 / 听力听写 / 写作 / 翻译 / 口语 / 数学
+
+【每种题型怎么写】
+
+=== 仔细阅读 ===          一段文章 + 几道四选一
+TITLE: 卷子名 · 仔细阅读
+PASSAGE:
+文章第一段
+
+文章第二段
+Q: 问题原文
+A. 选项一
+B. 选项二
+C. 选项三
+D. 选项四
+ANSWER: B
+EXPLAIN: 解析（没有就不写这一行）
+
+=== 听力理解 ===          播报稿 + 题目
+TITLE: 卷子名 · 听力理解
+SCRIPT:
+把听力原文（播报稿）整段写在这里，可以有多行
+Q: 问题原文
+A. 选项一
+B. 选项二
+C. 选项三
+D. 选项四
+ANSWER: A
+
+=== 选词填空 ===
+TITLE: 卷子名 · 选词填空
+PASSAGE:
+把文章里每个空写成 {{1}} {{2}} {{3}}，空按顺序编号
+OPTIONS: 备选词一 备选词二 备选词三 备选词四
+ANSWERS: 1:答案词 2:答案词 3:答案词
+
+=== 长篇匹配 ===
+TITLE: 卷子名 · 长篇匹配
+PARAGRAPHS:
+A. 第一段正文
+B. 第二段正文
+C. 第三段正文
+STATEMENTS:
+- 句子原文 | A
+- 句子原文 | C
+（竖线后面写这句属于哪一段）
+
+=== 写作 ===
+TITLE: 卷子名 · 写作
+MATERIAL: 题目要求（照抄题干）
+POINTS:
+- 要点一
+- 要点二
+SAMPLE:
+范文正文
+
+=== 翻译 ===
+TITLE: 卷子名 · 翻译
+MATERIAL: 中文原文
+REFERENCE: 参考答案
+
+=== 判断题 ===           写法和仔细阅读一样，选项固定是 True / False / Not Given
+
+=== 单项选择 ===         只有一道道题、没有文章，用 Q: / A. / ANSWER: 那一套
+
+=== 听力听写 ===
+TITLE: 卷子名 · 听力听写
+- 一句一行，一行只写一句英文
+
+=== 口语 ===
+TITLE: 卷子名 · 口语
+MATERIAL: 题目要求
+SECONDS: 60
+
+=== 数学 ===             GRE 数量推理，写法和单项选择一样
+
+【这张卷子是哪场考试的】
+它是一场「${ex.name}」的试卷，这场考试考的题型是：${list || '不限'}。
+材料里有什么就转什么，不用凑齐 —— 只转阅读、没转听力也是完全可以的。
+你手上如果只有听力的播报稿、没有音频，照样按「听力理解」写下来，
+站里会把播报稿显示出来，只是听不到声音。
+
+【材料在下面 / 在附件里】`;
+}
+
 /* ==========================================================================
    「我的题目」= 一堆**试卷**，一份文件就是一张卷子
    --------------------------------------------------------------------------
@@ -1883,12 +2069,51 @@ Should the library stay open longer during the exam period? I believe it should.
 function papersKey() { return 'papers:' + curExam().id; }
 function activePaperKey() { return 'paper:' + curExam().id; }
 
-function myPapers() {
+/* 系统自带的卷子（data/builtin.json）。
+   ⚠️ 只有**本地版**才有这个文件 —— 公开站上没有，于是返回空数组，
+      一切照旧（"带内容"与"不带内容"两种情况共用同一套代码）。
+   ⚠️ 它是**只读**的：整体一份 JSON，不能就地改。改名 / 移走另存一份覆盖表。 */
+function builtinPapers() {
+  const b = S.builtin;
+  const e = b && b.exams && b.exams[curExam().id];
+  return (e && Array.isArray(e.papers)) ? e.papers : [];
+}
+/* 原创样卷（data/samples.json）。
+   ⚠️ 和 builtin.json 分成两个文件的理由只有一条：
+      builtin.json 是**真题转录**，发布脚本每次都会把它从公开目录清掉；
+      samples.json 是**原创**，可以、也应该跟着公开站走。
+      混在一个文件里就得"按条过滤"，总有漏掉一天把真题带出去的风险。
+      分成两个文件之后规则是一句话：builtin 不公开，samples 公开。 */
+function samplePapers() {
+  const s = S.samples;
+  const e = s && s.exams && s.exams[curExam().id];
+  return (e && Array.isArray(e.papers)) ? e.papers : [];
+}
+function paperMetaKey() { return 'pmeta:' + curExam().id; }
+function paperMeta() { return LS.get(paperMetaKey(), {}) || {}; }
+
+/* 使用者自己导进来的那些（存在本地存储里） */
+function userPapers() {
   const d = LS.get(papersKey(), null);
   return (d && Array.isArray(d.list)) ? d.list : [];
 }
+/* 能选的卷子 = 系统自带（真题 + 原创样卷，改名 / 隐藏按覆盖表生效）+ 自己导入的
+   ⚠️ 真题排在样卷前面：有真题的考试（四级）就用真题，样卷是给那些
+      本机没有真题素材的考试（六级 / 雅思 / 考研……）兜底的。 */
+function myPapers() {
+  const meta = paperMeta();
+  const out = [];
+  builtinPapers().concat(samplePapers()).forEach(bp => {
+    const m = meta[bp.id];
+    if (m && m.hidden) return;
+    out.push(m && m.name ? Object.assign({}, bp, { name: m.name }) : bp);
+  });
+  return out.concat(userPapers());
+}
+/* ⚠️ 落盘时**必须把系统自带的那几张滤掉** —— 它们不该被写进本地存储，
+   不然下次 boot 读到的是一份"冻结的副本"，改了 builtin.json 也不生效。 */
 function savePapers(list) {
-  LS.set(papersKey(), { v: 2, list: list });
+  LS.set(papersKey(), { v: 3, list: (list || []).filter(p => !p.builtin) });
 }
 /* 当前练的是哪一张；'' 表示"全部一起练" */
 /* 现在**必须选中一张** —— 使用者要的是"导入后自己选练哪张"，
@@ -1907,6 +2132,10 @@ function activePaper() {
 }
 function setActivePaper(id) {
   LS.set(activePaperKey(), id || '');
+  /* 每张卷子记自己的"练到第几篇"。不分开的话，从一张 10 篇的卷子切到
+     另一张，游标还停在 9，一进去就直接落在最后一篇上。 */
+  prog = LS.get(progKey(), {}) || {};
+  draft = null;
   rebuildBank();
   render();
 }
@@ -1917,17 +2146,30 @@ function currentPapers() {
   const one = activePaper();
   return one ? [one] : [];
 }
-/* 当前试卷的题目，按题型汇总（listen 单独走 S.listen） */
-function myBankTypes() {
+/* 把若干张卷子摊平成 [{type, typeName, items}]（listen 单独走 S.listen）
+   ⚠️ 每条题都要打上 **pid（属于哪张卷子）** —— 答题记录的键要用它。
+      不打的话，内置了 30 套真题之后，"换一张卷子"会把上一张
+      同一位置（第 3 篇仔细阅读）的作答原样串到这一张上。 */
+function flattenPapers(list) {
   const out = [];
-  currentPapers().forEach(p => {
+  (list || []).forEach(p => {
     (p.types || []).forEach(t => {
       let slot = out.find(x => x.type === t.type);
       if (!slot) { slot = { type: t.type, typeName: myTypeMeta(t.type).name, items: [] }; out.push(slot); }
-      slot.items = slot.items.concat(t.items || []);
+      slot.items = slot.items.concat((t.items || []).map(
+        it => (it.pid === p.id ? it : Object.assign({}, it, { pid: p.id }))));
     });
   });
   return out;
+}
+/* 当前试卷的题目 */
+function myBankTypes() { return flattenPapers(currentPapers()); }
+/* 导出去给别人的那份不要带 pid —— 那是本机卷子 id，换台机器就没意义了 */
+function stripPid(types) {
+  return (types || []).map(t => ({
+    type: t.type, typeName: t.typeName,
+    items: (t.items || []).map(it => { const c = Object.assign({}, it); delete c.pid; return c; }),
+  }));
 }
 /* 某题型"每题多少分"：试卷标过就用标的 */
 function paperMarkOf(type) {
@@ -3321,6 +3563,16 @@ function ocrWhyUnavailable(e) {
 /* ---------- 一次把若干文件读成文字 ---------- */
 let importReport = null;   // 最近一次导入的结果（成功/失败都留在这儿给用户看）
 let myPanelOpen = false;
+/* 「在浏览器里直接试读原始文件」那条兜底路径，默认收起来 ——
+   它读 PDF / Word / 图片的成功率看排版，只当备用。 */
+let myRawOpen = false;
+/* 「格式示例」摊开没有。
+   ⚠️ 原来这个按钮点下去**什么都不会发生** —— 它要 display 的那个
+      #myfmt 压根没渲染出来，MYFORMAT_DEMO 也从没被用过（死代码）。
+      现在真的渲染出来，开合状态记在这里，免得被一次 render 又关回去。 */
+let myFmtOpen = false;
+/* 剪贴板 API 用不了时的最后退路：把提示词本尊摊在页面上让人手动选。 */
+let aiPromptShown = false;
 
 const AUDIO_EXT = /^(mp3|m4a|wav|ogg|oga|aac|flac|opus|weba|mp4)$/;
 /* 文件的"组"：文件夹导入时用它在的目录，普通选择文件时为空。
@@ -3827,18 +4079,28 @@ async function idbGet(key) {
   });
 }
 
-/* 播放一段配好的音频。对象 URL 缓存起来，别每点一次就新建一个。 */
+/* 播放一段配好的音频。对象 URL 缓存起来，别每点一次就新建一个。
+   ⚠️ 音频有两种来路，键的写法不一样：
+      1) 自己导进来的 → 内容是 Blob，存在 IndexedDB 里，键就是个随机 id
+      2) 系统自带的真题 → 文件在 data/audio/ 下，键写成 'url:data/audio/x.mp3'
+   两种都从这里走，这样界面上（`if (it.audio)`）不用分情况。 */
 const audioUrls = {};
 let curAudioEl = null;
 async function playPaperAudio(aid) {
   try {
-    if (!audioUrls[aid]) {
-      const blob = await idbGet(aid);
-      if (!blob) { toast('这段音频没存住（换用在线地址再导一次就好）'); return; }
-      audioUrls[aid] = URL.createObjectURL(blob);
+    const key = String(aid || '');
+    if (!key) { toast('这条没有配音频'); return; }
+    if (!audioUrls[key]) {
+      if (key.indexOf('url:') === 0) {
+        audioUrls[key] = key.slice(4);
+      } else {
+        const blob = await idbGet(key);
+        if (!blob) { toast('这段音频没存住（换用在线地址再导一次就好）'); return; }
+        audioUrls[key] = URL.createObjectURL(blob);
+      }
     }
     if (curAudioEl) { curAudioEl.pause(); curAudioEl = null; }
-    const el = new Audio(audioUrls[aid]);
+    const el = new Audio(audioUrls[key]);
     curAudioEl = el;
     el.play().catch(() => toast('浏览器挡住了自动播放，再点一下播放键'));
   } catch (e) {
@@ -3973,7 +4235,12 @@ function parseMyBankInput(text) {
 /* 把「自备材料」和「我的题目」并进当前题库。
    ⚠️ 用**重建**而不是追加，避免重复调用时越叠越多。
    ⚠️ 只放**当前选中的那几张试卷** —— 进度、统分、题库全跟着走，
-      这就是"选择我的题目"这个功能的意义。 */
+      这就是"选择我的题目"这个功能的意义。
+   ⚠️ **我这套卷子覆盖了的题型，就只留这套卷子的题**，不再和站内那点原创
+      示例题拼在一起。理由很简单：一套卷子就该是一套卷子。
+      拼起来的话，一份四级卷的「仔细阅读」会显示成 6 篇（我的 2 篇 + 示例 4 篇），
+      点进去还能一路翻到示例题，可进度条只算这套卷子的 —— 看着就像坏了。
+      站内示例题仍然在的，只是留给"这场考试还没有卷子"的时候用（雅思/GRE 那些）。 */
 function rebuildBank() {
   if (!S.base) return;
   const clone = JSON.parse(JSON.stringify(S.base));
@@ -3987,8 +4254,17 @@ function rebuildBank() {
       else clone.types.push(t);
     }
   };
+  /* 覆盖：同题型直接换成我这套卷子的题 */
+  const cover = (types, listenBox) => {
+    for (const t of (types || [])) {
+      if (t.type === 'listen') { listenBox.push.apply(listenBox, t.items || []); continue; }
+      const bt = clone.types.find(x => x.type === t.type);
+      if (bt) bt.items = (t.items || []).slice();
+      else clone.types.push({ type: t.type, typeName: t.typeName, items: (t.items || []).slice() });
+    }
+  };
   add(S.localTypes, localListen);        // 站里带的「自备材料」
-  add(myBankTypes(), mineListen);        // 我的题目（当前选中的试卷）
+  cover(myBankTypes(), mineListen);      // 我的题目（当前选中的试卷）—— 覆盖同题型
   S.bank = clone;
   S.bank.hasLocal = S.localCount || 0;
   S.bank.hasMine = myBankCount();
@@ -4046,23 +4322,46 @@ function savePaper(key, name, types, extra) {
   savePapers(list);
   return p;
 }
+/* ⚠️ 系统自带的卷子是**只读**的（整体一份 JSON，改不了原地），
+   所以改名 / 移走都记在那张覆盖表里，不动原始数据。
+   「系统自带」包括两部分：真题（builtin.json）和原创样卷（samples.json）。 */
+function isBuiltinPaper(id) {
+  return builtinPapers().some(p => p.id === id)
+    || samplePapers().some(p => p.id === id);
+}
 function renamePaper(id, name) {
-  const list = myPapers();
+  const t = String(name || '').trim();
+  if (!t) return;
+  if (isBuiltinPaper(id)) {
+    const m = paperMeta();
+    if (m[id] && m[id].hidden) return;
+    m[id] = Object.assign({}, m[id], { name: t.slice(0, 60) });
+    LS.set(paperMetaKey(), m);
+    return;
+  }
+  const list = userPapers();
   const p = list.find(x => x.id === id);
   if (!p) return;
-  const t = String(name || '').trim();
-  if (t) p.name = t.slice(0, 60);
+  p.name = t.slice(0, 60);
   savePapers(list);
 }
 function removePaper(id) {
-  savePapers(myPapers().filter(p => p.id !== id));
+  if (isBuiltinPaper(id)) {
+    const m = paperMeta();
+    m[id] = Object.assign({}, m[id], { hidden: true });
+    LS.set(paperMetaKey(), m);
+  } else {
+    savePapers(userPapers().filter(p => p.id !== id));
+  }
   if (activePaperId() === id) LS.set(activePaperKey(), '');
 }
 
 /* 导出成能再导入回来的 JSON。
    ⚠️ 一定要带 paperKey：不然导出再导入会**又多出一张一模一样的卷子**。 */
 function myBankExportJson() {
-  const ps = myPapers();
+  /* ⚠️ 只导出**自己导入的** —— 系统自带的那 30 套是站里就有的，
+     导出再导入只会白多出 30 张卷子。 */
+  const ps = userPapers();
   /* ⚠️ 一定要**按试卷分别导出**，不要把几份合并成一大坨 ——
      合并导出再导入会越导越多（每导一次就把别人的题也算进自己这张卷子里）。 */
   return JSON.stringify({
@@ -4072,7 +4371,7 @@ function myBankExportJson() {
     papers: ps.map(x => ({
       key: x.src || x.id, name: x.name, marks: x.marks || {}, types: x.types,
     })),
-    types: myBankTypes(),          // 兼容老版本（只认 types 的那种）
+    types: stripPid(flattenPapers(userPapers())),   // 兼容老版本（只认 types 的那种）
   }, null, 1);
 }
 
@@ -4161,22 +4460,35 @@ function papersMissingAudio(p) {
 
 function papersListHtml() {
   const list = myPapers();
+  const nS = samplePapers().length;
+  const nB = builtinPapers().length + nS;
   if (!list.length) {
-    return `<div class="meta">把卷子导进来就能练，还能按考试标准算分。
-      导入的内容只归「${esc(examShort())}」这场考试。</div>`;
+    return `<div class="meta">这场考试还没有题库。在下面「加新卷子」里可以把材料交给 AI 转进来。</div>`;
   }
   const cur = activePaperId();
+  const nU = userPapers().length;
   let h = `<div class="meta" style="margin-bottom:8px">
-    「${esc(examShort())}」共 <b>${list.length}</b> 张卷子 · <b>点一张就练它</b></div>`;
+    「${esc(examShort())}」共 <b>${list.length}</b> 张卷子 · <b>点一张就练它</b>${
+      nB ? `　（系统自带 ${nB} 张${nU ? '，自己导入 ' + nU + ' 张' : ''}）` : ''}</div>`;
   list.forEach(p => {
     const on = cur === p.id;
     const stat = (p.types || []).map(t => {
       const m = myTypeMeta(t.type);
       return m.name + ' ' + (t.items || []).length + m.unit;
     }).join(' · ');
-    const units = (p.types || []).reduce((a, t) => a + unitCountOf(t.type, t.items), 0);
+    const units = paperUnitsOf(p);
     const hasListen = (p.types || []).some(t => t.type === 'listening');
-    const donor = papersMissingAudio(p) ? audioDonor(p.id) : null;
+    const donor = (!p.builtin && papersMissingAudio(p)) ? audioDonor(p.id) : null;
+    /* ⚠️ 「没配音频」有两种情况，别混成一句：
+       ① 连原文都没有（真题里 2022-09 / 2023-03 那两次补考）→ 真的什么都听不到，
+          要把原因写在卡片上；
+       ② 有原文、只是没配录音文件（原创样卷就是这样）→ 点播放能用浏览器朗读，
+          这时候写「听不到声音」是错的，会让人以为这份卷子坏了。 */
+    const scripts = (p.types || [])
+      .filter(t => t.type === 'listening')
+      .reduce((a, t) => a.concat((t.items || []).filter(it => it && it.script)), []);
+    const gap = (p.types || []).map(t => (t.items || [])[0]).find(it => it && it.audioGap);
+    const hasScript = scripts.length > 0;
     /* 整张卡就是"选它"的按钮 —— 左边一个单选圆点，选中的整卡高亮。
        之前只在卡里放了个不显眼的「练这一张」，谁也不知道能选（用户反馈"没法自己选"）。 */
     h += `<div class="paper${on ? ' on' : ''}" data-paperuse="${p.id}"
@@ -4191,25 +4503,72 @@ function papersListHtml() {
         ${on ? '<span class="tag" style="background:var(--brand);color:#fff;'
           + 'border-color:transparent">正在练</span>' : ''}
       </div>
-      <div class="meta" style="margin:6px 0 0">${esc(stat) || '（没有题目）'} · 共 ${units} ${scoreUnit('careful')}</div>
+      <div class="meta" style="margin:6px 0 0">${
+        p.sample ? '<span style="color:var(--brand)">原创样卷 · </span>'
+          : p.builtin ? '<span style="color:var(--brand)">系统自带 · </span>' : ''}${
+        esc(stat) || '（没有题目）'} · 共 ${units} ${scoreUnit('careful')}</div>
       ${(p.sources || []).length > 1 ? `<div class="meta" style="margin-top:2px">
         由 ${p.sources.length} 份文档合成：${esc(p.sources.join('、'))}</div>` : ''}
       ${hasListen ? ((p.audio || []).length
-        ? `<div class="meta" style="margin-top:2px">听力音频：${esc(p.audio.map(a => a.name).join('、'))}（这份卷子共用）</div>`
-        : `<div class="meta" style="margin-top:4px;color:var(--warn)">
-            ⚠ 有听力题，但没配上音频 —— 题目能照常练，只是听不到声音。</div>`) : ''}
+        ? `<div class="meta" style="margin-top:2px">听力录音：${esc(p.audio.map(a => a.name).join('、'))}</div>`
+        : (hasScript
+          ? `<div class="meta" style="margin-top:2px">听力：<b>有原文、没配录音</b>
+              —— 点播放键用浏览器朗读</div>`
+          : `<div class="meta" style="margin-top:4px;color:var(--warn)">
+              ⚠ ${esc(gap && gap.audioGap
+                ? '这一套的官方录音没有收录 —— 听力题还在，只是听不到声音。'
+                : '有听力题，但没配上音频 —— 题目能照常练，只是听不到声音。')}</div>`)) : ''}
       ${p.hasAnswers
-        ? `<div class="meta" style="margin-top:2px">答案 / 解析：已合并</div>`
+        ? `<div class="meta" style="margin-top:2px">答案 / 解析：${p.builtin ? '齐全' : '已合并'}</div>`
         : `<div class="meta" style="margin-top:4px;color:var(--warn)">
             ⚠ 没有答案 / 解析 —— 做题时看不到正确答案。</div>`}
       <div class="row" style="margin:8px 0 0;gap:6px">
-        <button class="btn ghost sm" data-paperdel="${p.id}">删掉</button>
+        <button class="btn ghost sm" data-paperdel="${p.id}">${p.builtin ? '移走' : '删掉'}</button>
         ${donor ? `<button class="btn ghost sm" data-paperborrow="${p.id}">用「${
           esc(donor.name)}」的音频</button>` : ''}
       </div>
     </div>`;
   });
   return h;
+}
+
+/* 复制给 AI 的提示词。留三条路，保证"点了就有东西可拿"：
+     ① navigator.clipboard —— 要 https 或 localhost，file:// 下没有
+     ② execCommand('copy') —— 老办法，http 下还能用
+     ③ 都不行就把提示词摊在页面上并自动选中，让人手动复制
+   不这么写的话，用单文件版（file:// 打开）点复制会静悄悄没反应。 */
+function copyAIPrompt() {
+  const txt = aiPromptText();
+  const done = () => toast('提示词已复制，粘给 AI 一起发过去就行');
+  const manual = () => {
+    aiPromptShown = true;
+    myPanelOpen = true;
+    render();
+    const el = document.getElementById('myprompt');
+    if (el) { try { el.focus(); el.select(); } catch (e) { /* 选不中也无妨 */ } }
+    toast('复制没成功 —— 下面已经摊开了，手动全选复制一下');
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(done, () => {
+      if (!legacyCopy(txt)) manual(); else done();
+    });
+    return;
+  }
+  if (legacyCopy(txt)) done(); else manual();
+}
+
+function legacyCopy(txt) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = txt;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return !!ok;
+  } catch (e) { return false; }
 }
 
 function vMe() {
@@ -4232,11 +4591,76 @@ function vMe() {
   <div class="card tight">
     ${papersListHtml()}
     <div class="row" style="margin-top:10px">
-      <button class="btn ghost sm" data-mytoggle="1">导入试卷</button>
-      ${myPapers().length ? `<button class="btn ghost sm" data-myexport="1">导出（可以传给别人）</button>
-      <button class="btn ghost sm" data-myclear="1">清空</button>` : ''}
+      <button class="btn ghost sm" data-mytoggle="1">${
+        myPanelOpen ? '收起' : '加新卷子（用 AI 转格式）'}</button>
+      ${userPapers().length ? `<button class="btn ghost sm" data-myexport="1">导出（可以传给别人）</button>
+      <button class="btn ghost sm" data-myclear="1">清空导入的</button>` : ''}
     </div>
     <div id="mypanel"${myPanelOpen ? ' style="display:block"' : ' style="display:none"'}>
+
+      <div class="meta" style="margin:12px 0 0">
+        手上是 PDF、Word、还是手机拍的照，都行。<b>不用自己去转格式</b> ——
+        把材料丢给 AI，让它按站里认得的样式交回来，再粘进来。
+      </div>
+
+      <div class="step">
+        <span class="n">1</span>
+        <div style="flex:1">
+          <b>复制下面这段话</b>
+          <div class="meta" style="margin:2px 0 8px">
+            它已经把站里认得的格式全写给 AI 了，你一个字都不用改。
+          </div>
+          <div class="row" style="margin:0">
+            <button class="btn" data-mycopy="1">复制给 AI 的提示词</button>
+            <button class="btn ghost sm" data-myfmt="1">看看它要求的样子</button>
+          </div>
+          <pre id="myfmt" class="fmt"${myFmtOpen ? ' style="display:block"' : ''}>${esc(MYFORMAT_DEMO)}</pre>
+          ${aiPromptShown ? `<div class="meta" style="margin:8px 0 0">
+            复制没成功，那就手动全选下面这段（已经帮你选中了）：</div>
+          <textarea id="myprompt" readonly rows="12"
+            style="width:100%;box-sizing:border-box;font-family:ui-monospace,Consolas,monospace;font-size:11.5px;padding:8px;border:1px solid var(--brand);border-radius:8px">${esc(aiPromptText())}</textarea>` : ''}
+        </div>
+      </div>
+
+      <div class="step">
+        <span class="n">2</span>
+        <div style="flex:1">
+          <b>连你的试卷一起发给 AI</b>
+          <div class="meta" style="margin:2px 0 0">
+            豆包 / DeepSeek / Kimi / ChatGPT 都行。把 PDF 或照片当附件传上去，
+            再把刚复制的那段话粘在下面一起发。<br>
+            它给你<b>一段文字</b>或者<b>一个 .json 文件</b>都可以 —— 两种都收。
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <span class="n">3</span>
+        <div style="flex:1">
+          <b>把 AI 交回来的东西放进这里</b>
+          <div class="meta" style="margin:2px 0 8px">
+            是文字就直接粘下面。是个文件的话，拖到这一页任何地方都行。
+          </div>
+          <textarea id="mytext" rows="8" placeholder="把 AI 给你的那段文字粘在这里…"
+            style="width:100%;box-sizing:border-box;font-family:ui-monospace,Consolas,monospace;font-size:12px;padding:8px;border:1px solid var(--line);border-radius:8px">${importReport && importReport.fileText ? esc(importReport.fileText) : ''}</textarea>
+          <div class="row" style="margin:8px 0 0">
+            <button class="btn" data-myimport="1">导入</button>
+            <label class="btn ghost sm" style="cursor:pointer;margin:0">
+              选 AI 给的文件
+              <input type="file" id="myjson" multiple accept=".json,.txt,.md,.csv,.tsv" style="display:none">
+            </label>
+          </div>
+        </div>
+      </div>
+
+      ${importReportHtml()}
+
+      <div class="row" style="margin-top:14px">
+        <button class="btn ghost sm" data-myraw="1">${
+          myRawOpen ? '收起' : 'AI 用不了？也可以让它在本机直接试读原始文件'}</button>
+      </div>
+      <div id="myraw"${myRawOpen ? ' style="display:block"' : ' style="display:none"'}>
+
       <div id="mydrop" class="drop" style="cursor:pointer" title="点一下选文件夹">
         <div style="font-size:16px"><b>点这里选文件夹</b></div>
         <div style="font-weight:400;font-size:13px;color:var(--fg2);margin-top:2px">
@@ -4257,16 +4681,7 @@ function vMe() {
         </div>
       </div>
 
-      
-
-      <textarea id="mytext" rows="7" placeholder="也可以把文字直接粘贴在这里（手机相册长按图片就能「提取文字」）"
-        style="width:100%;box-sizing:border-box;font-family:ui-monospace,Consolas,monospace;font-size:12px;padding:8px;border:1px solid var(--line);border-radius:8px">${importReport && importReport.fileText ? esc(importReport.fileText) : ''}</textarea>
-      <div class="row">
-        <button class="btn" data-myimport="1">导入</button>
-        <button class="btn ghost sm" data-myfmt="1">看格式示例</button>
       </div>
-      
-      ${importReportHtml()}
     </div>
   </div>
 
@@ -4553,6 +4968,43 @@ document.addEventListener('change', e => {
     handleImportFiles(fs);        // 选文件夹时每个文件自带 webkitRelativePath
     try { e.target.value = ''; } catch (e2) { /* 允许再选同一个文件夹 */ }
   }
+});
+
+/* AI 交回来的文件。
+   ⚠️ 走的是和「粘贴」**同一条**路（importMyBank），不是文件夹那条 ——
+      文件夹那条会按"这一组里有没有答案文件"来判，而 AI 转出来的
+      文字里答案就写在每道题下面，走那边会平白报一句"没找到答案/解析"。
+      另外这条路天然满足"一次提交 = 一张卷子"。 */
+document.addEventListener('change', async e => {
+  if (!e.target || e.target.id !== 'myjson') return;
+  const fs = Array.prototype.slice.call(e.target.files || []);
+  try { e.target.value = ''; } catch (e2) { /* 允许再选同一个文件 */ }
+  if (!fs.length) return;
+  const f = fs[0];
+  const problems = [], notes = [];
+  if (fs.length > 1) {
+    notes.push('一次只吃一个文件，我先用了「' + f.name + '」，剩下的请再选一次。');
+  }
+  importNote('正在读 ' + f.name + '…');
+  let text = null;
+  try { text = await readOneImport(f, '', problems, notes); }
+  catch (e2) { problems.push(f.name + '：读不了 —— ' + (e2 && e2.message)); }
+  importNote('');
+  if (!text || !String(text).trim()) {
+    importReport = { ok: false, msg: '这个文件里没读出内容',
+                     problems: problems.length ? problems : ['读不了：' + f.name] };
+    render();
+    toast('这个文件读不出内容');
+    return;
+  }
+  const r = importMyBank(text, f.name.replace(/\.[^.]+$/, ''));
+  importReport = Object.assign({}, r, {
+    problems: (r.problems || problems).concat(problems),
+    notes: (r.notes || []).concat(notes),
+  });
+  render();
+  if (r.ok) toast('已导入：' + r.types);
+  else toast('导入失败：' + (r.msg || '内容对不上'));
 });
 ['dragenter', 'dragover'].forEach(ev => document.addEventListener(ev, e => {
   if (!e.dataTransfer || Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') < 0) return;
@@ -4867,10 +5319,18 @@ document.addEventListener('click', e => {
     return;
   }
   if (e.target.closest('[data-myfmt]')) {
-    const p = $('#myfmt');
-    if (p) p.style.display = (p.style.display === 'block') ? 'none' : 'block';
+    /* ⚠️ 开合状态要记在变量里再 render —— 原来直接改 el.style，
+       任何一次 render 都会把它关回去（而且那个元素本来就没渲染出来）。 */
+    myFmtOpen = !myFmtOpen;
+    render();
     return;
   }
+  if (e.target.closest('[data-myraw]')) {
+    myRawOpen = !myRawOpen;
+    render();
+    return;
+  }
+  if (e.target.closest('[data-mycopy]')) { copyAIPrompt(); return; }
   if (e.target.closest('[data-myimport]')) {
     const ta = $('#mytext');
     const r = importMyBank(ta ? ta.value : '', '粘贴导入的题目');
@@ -5076,18 +5536,29 @@ document.addEventListener('change', e => {
 async function boot() {
   try {
     migrateExamCfg();           // 老数据迁移：方向/日期搬到"每场考试各一份"
+    migrateAnsKeys();           // 老数据迁移：答题记录的键补上"哪张卷子"这一层
     const IN = window.__INLINE_DATA__;
-    let bank, listen;
+    let bank, listen, builtin = null, samples = null;
     if (IN) {
       bank = IN.bank;
       listen = IN.listen || null;
+      builtin = IN.builtin || null;
+      samples = IN.samples || null;
     } else {
-      [bank, listen] = await Promise.all([
+      [bank, listen, builtin, samples] = await Promise.all([
         fetch('data/bank.json').then(r => r.json()),
-        fetch('data/listening.json').then(r => r.json()).catch(() => null)
+        fetch('data/listening.json').then(r => r.json()).catch(() => null),
+        /* 系统自带的真题卷。⚠️ 只有**本地版**才有这个文件：
+           公开站上取不到 → S.builtin 为空 → 一张都不显示，别的照旧。
+           （真题转录有版权，不能跟着公开站走。） */
+        fetch('data/builtin.json').then(r => r.json()).catch(() => null),
+        /* 原创样卷。**这个公开站也有** —— 它是自己写的，没有版权问题，
+           正好用来给那些本机没有真题素材的考试（六级 / 雅思 / 考研…）兜底。 */
+        fetch('data/samples.json').then(r => r.json()).catch(() => null)
       ]);
     }
     S.base = bank; S.baseListen = listen; S.listen = listen;
+    S.builtin = builtin; S.samples = samples;
 
     if (!IN) {
       // 自备题库（site/data/bank.local.json）：只有本地版才有这个文件
