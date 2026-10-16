@@ -2755,9 +2755,14 @@ async function readImportFile(file) {
     let imgs = pdfEmbeddedJpegs(ab);
     if (!imgs.length) imgs = await pdfFlateImages(pdfLatin1(ab));   // 原始位图那种
     if (imgs.length) return { ok: false, pdfImages: imgs };
-    return { ok: false, msg: '这个 PDF 里既没有可以直接复制的文字，'
-      + '也没有能抠出来的整页图（可能是用浏览器「打印成 PDF」生成的特殊格式）。'
-      + '两个办法：① 把每页截图，用图片识别；② 用 Word / WPS 打开另存为 .docx。' };
+    /* ⚠️ PDF 的排版千奇百怪（加密、字体子集、浏览器打印、扫描…），
+       读不出来是常态。这时候**最该给的一句话是"转成 docx"** ——
+       那是最省事、成功率最高的路；别把办法藏在后面让人自己找。 */
+    return { ok: false, msg: 'PDF 读不出来。'
+      + '**最省事的办法：用 Word / WPS 打开这个 PDF，另存为 .docx，再传一次**'
+      + '（.docx 一定能读，PDF 的排版什么情况都有）。'
+      + '实在转不了的备选：① 把每页截图，用图片识别；'
+      + '② 用手机相册／微信的「提取文字」把文字提出来粘进来。' };
   }
   if (IMG_EXT.test(ext)) {
     return { ok: false, image: file, msg: '这是一张图片，要走识别。' };
@@ -3372,8 +3377,9 @@ async function readOneImport(f, tag, problems, notes) {
       }
     }
     if (!got.length) {
-      problems.push(f.name + '：这是扫描件，但站内识别只装了英文模型，里面没读出可用的'
-        + '英文（中文扫描件请用手机相册／微信的「提取文字」转成文字再粘进来）。');
+      problems.push(f.name + '：这是扫描件，站内识别只装了英文模型，里面没读出可用的英文。'
+        + '**建议用 Word / WPS 打开这个 PDF 另存为 .docx** 再传一次；'
+        + '中文扫描件可以用手机相册／微信的「提取文字」把文字提出来粘进来。');
       return null;
     }
     notes.push(f.name + '：这是扫描件，按图片识别了 ' + got.length + '/' + pages.length
@@ -4183,7 +4189,7 @@ function papersListHtml() {
   }
   const cur = activePaperId();
   let h = `<div class="meta" style="margin-bottom:8px">
-    「${esc(examShort())}」共 <b>${list.length}</b> 张卷子 · 点「练」换一张</div>`;
+    「${esc(examShort())}」共 <b>${list.length}</b> 张卷子 · <b>点一张就练它</b></div>`;
   list.forEach(p => {
     const on = cur === p.id;
     const stat = (p.types || []).map(t => {
@@ -4193,11 +4199,18 @@ function papersListHtml() {
     const units = (p.types || []).reduce((a, t) => a + unitCountOf(t.type, t.items), 0);
     const hasListen = (p.types || []).some(t => t.type === 'listening');
     const donor = papersMissingAudio(p) ? audioDonor(p.id) : null;
-    h += `<div class="paper${on ? ' on' : ''}">
-      <div class="row" style="margin:0;gap:6px;align-items:center">
+    /* 整张卡就是"选它"的按钮 —— 左边一个单选圆点，选中的整卡高亮。
+       之前只在卡里放了个不显眼的「练这一张」，谁也不知道能选（用户反馈"没法自己选"）。 */
+    h += `<div class="paper${on ? ' on' : ''}" data-paperuse="${p.id}"
+      style="cursor:pointer;${on ? 'border-color:var(--brand);'
+        + 'background:var(--brand-soft);box-shadow:0 0 0 1px var(--brand) inset' : ''}">
+      <div class="row" style="margin:0;gap:8px;align-items:center">
+        <span style="font-size:20px;line-height:1;color:${on ? 'var(--brand)' : 'var(--fg3)'}"
+          >${on ? '●' : '○'}</span>
         <input class="papername" data-paperrename="${p.id}" value="${esc(p.name)}"
-          maxlength="60" title="直接点这里就能改卷子名">
-        ${on ? '<span class="tag" style="background:var(--brand-soft);color:var(--brand);'
+          maxlength="60" title="点这里可以改卷子名"
+          style="flex:1;min-width:0">
+        ${on ? '<span class="tag" style="background:var(--brand);color:#fff;'
           + 'border-color:transparent">正在练</span>' : ''}
       </div>
       <div class="meta" style="margin:6px 0 0">${esc(stat) || '（没有题目）'} · 共 ${units} ${scoreUnit('careful')}</div>
@@ -4213,10 +4226,9 @@ function papersListHtml() {
         : `<div class="meta" style="margin-top:4px;color:var(--warn)">
             ⚠ 没有答案 / 解析 —— 做题时看不到正确答案。</div>`}
       <div class="row" style="margin:8px 0 0;gap:6px">
-        ${on ? '' : `<button class="btn" data-paperuse="${p.id}">练这一张</button>`}
+        <button class="btn ghost sm" data-paperdel="${p.id}">删掉</button>
         ${donor ? `<button class="btn ghost sm" data-paperborrow="${p.id}">用「${
           esc(donor.name)}」的音频</button>` : ''}
-        <button class="btn ghost sm" data-paperdel="${p.id}">删掉</button>
       </div>
     </div>`;
   });
@@ -4251,7 +4263,8 @@ function vMe() {
       <div id="mydrop" class="drop" style="cursor:pointer" title="点一下选文件夹">
         <div style="font-size:16px"><b>点这里选文件夹</b></div>
         <div style="font-weight:400;font-size:13px;color:var(--fg2);margin-top:2px">
-          也可以把整个文件夹直接拖进来
+          也可以把整个文件夹直接拖进来<br>
+          <span style="color:var(--fg3)">Word（.docx）最稳；PDF 排版复杂，读不出时请转成 .docx</span>
         </div>
         <input type="file" id="mydir" webkitdirectory directory multiple style="display:none">
         <label class="meta" style="display:inline-block;margin-top:10px;cursor:pointer;
@@ -4923,7 +4936,9 @@ document.addEventListener('click', e => {
     return;
   }
   /* 只练这一张 / 改回全部一起练 */
-  if (e.target.closest('[data-paperuse]')) {
+  if (e.target.closest('[data-paperuse]')
+    && !e.target.closest('input') && !e.target.closest('[data-paperdel]')
+    && !e.target.closest('[data-paperborrow]')) {
     const id = e.target.closest('[data-paperuse]').dataset.paperuse;
     setActivePaper(id);
     const p = activePaper();
