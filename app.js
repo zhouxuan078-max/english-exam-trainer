@@ -2337,13 +2337,16 @@ function officeXmlToText(xml) {
   return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-/* 一段文本"像不像题目"：英文字母占比太低就说明抽出来的是乱码/空白。 */
+/* 一段文本"像不像正常文字"：乱码/二进制就判 false。
+   ⚠️ 别只数 [A-Za-z]！踩过：只数英文字母的话，**中文 PDF / 中文 Word**
+      会被判成"没读出文字"，直接丢掉 —— 而中文文档恰恰是最常见的。
+      所以这里数的是"真正是文字"的字符：英文、数字、汉字、假名。 */
 function looksLikeText(s) {
   const t = String(s || '');
   if (t.trim().length < 20) return false;
-  const letters = (t.match(/[A-Za-z]/g) || []).length;
+  const good = (t.match(/[A-Za-z0-9\u4e00-\u9fff\u3040-\u30ff]/g) || []).length;
   const bad = (t.match(/[\u0000-\u0008\u000e-\u001f]/g) || []).length;
-  return letters / t.length > 0.25 && bad / t.length < 0.02;
+  return good / t.length > 0.5 && bad / t.length < 0.02;
 }
 
 /* 读一个文件 → 文本。返回 { ok, text } 或 { ok:false, msg }。 */
@@ -2366,12 +2369,16 @@ async function readImportFile(file) {
       + '用 Word / WPS 打开后「另存为」.docx 或 .txt 再导。' };
   }
   if (ext === 'pdf') {
-    const r = await textFromPdf(await file.arrayBuffer());
-    if (!r) {
-      return { ok: false, msg: '这个 PDF 里没有可以直接复制的文字 —— 多半是扫描件（整页都是图）。'
-        + '两个办法：① 把每页截图，用图片识别；② 用 Word / WPS 打开另存为 .docx。' };
-    }
-    return { ok: true, text: r };
+    const ab = await file.arrayBuffer();
+    const txt = await textFromPdf(ab);
+    if (txt) return { ok: true, text: txt };
+    /* 读不出文字不代表没救：扫描件 PDF 的整页就是一张 JPEG，
+       而且原样存在文件里，可以直接抠出来交给离线识别。 */
+    const imgs = pdfEmbeddedJpegs(ab);
+    if (imgs.length) return { ok: false, pdfImages: imgs };
+    return { ok: false, msg: '这个 PDF 里既没有可以直接复制的文字，'
+      + '也没有能抠出来的整页图（可能是用浏览器「打印成 PDF」生成的特殊格式）。'
+      + '两个办法：① 把每页截图，用图片识别；② 用 Word / WPS 打开另存为 .docx。' };
   }
   if (IMG_EXT.test(ext)) {
     return { ok: false, image: file, msg: '这是一张图片，要走识别。' };
@@ -2383,37 +2390,88 @@ async function readImportFile(file) {
 /* PDF：只处理"文字型"（Word / 网页导出的）。扫描件里根本没有文字，
    会明确告诉用户，而不是塞一堆乱码进去。
    不引 pdf.js —— 那是几 MB 的额外体积，为了"贴一道题"不值。
-   做法：把每个 stream 解压，抓 (…) Tj 和 [ (…) ] TJ 里的字符串。 */
+   做法：把每个 stream 解压，抓 (…) Tj 和 [ (…) ] TJ 里的字符串。
+
+   ⚠️ 踩过的坑，改这里之前先读：
+     "endstream" 这个词**结尾正好是 "stream"**，所以 /stream\r?\n/g 会在
+     "endstream\r\n" 里再匹配一次，把一个流的末尾当成下一个流的开头 ——
+     于是只有第一个流被正确定位，后面的全错位，整个 PDF 一个字都读不出来
+     （表现就是"PDF 明明有字，却说读不出文字"）。
+     所以既要跳过整个 endstream，正则也要排除前面是 end 的情况。 */
 async function textFromPdf(buf) {
-  const u8 = new Uint8Array(buf);
-  let raw = '';
-  const CH = 0x8000;
-  for (let i = 0; i < u8.length; i += CH) {
-    raw += String.fromCharCode.apply(null, u8.subarray(i, i + CH));
-  }
+  const raw = pdfLatin1(new Uint8Array(buf));
+  const maps = await pdfFontMaps(raw);   // 字体表：字形编号 → 文字
   let out = '';
-  const re = /stream\r?\n/g;
+  const re = /(?<!end)stream\r?\n/g;
   let m;
   while ((m = re.exec(raw))) {
     const start = m.index + m[0].length;
     const end = raw.indexOf('endstream', start);
     if (end < 0) break;
-    re.lastIndex = end;
+    re.lastIndex = end + 9;            // 跳过整个 endstream，别再匹配到它里面的 stream
     const chunk = raw.slice(start, end);
     let txt = null;
     if (chunk.charCodeAt(0) === 0x78) {
       const bytes = new Uint8Array(chunk.length);
       for (let i = 0; i < chunk.length; i++) bytes[i] = chunk.charCodeAt(i) & 0xff;
-      txt = await inflateWith(bytes, 'deflate');
+      txt = await inflatePdfStream(bytes);
     }
     if (!txt) txt = chunk;
-    out += pdfRunStrings(txt);
+    // 只处理"像内容流"的那些；字体流、图片流里没有画字操作符，跳过免得塞乱码
+    if (!/(\bBT\b|\bTj\b|\bTJ\b)/.test(txt)) continue;
+    out += pdfContentText(txt, maps);
   }
   out = out.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
   return looksLikeText(out) ? out : null;
 }
 
-/* 抓 PDF 内容流里画字的字符串：(...) Tj / (...) ' / [...] TJ */
+/* PDF 里的 FlateDecode = zlib 包装（2 字节头 + deflate 数据 + adler32）。
+   ⚠️ 不能把整段直接丢给 DecompressionStream('deflate')：
+      PDF 的流在 endstream 之前一般还跟着个 \r\n，浏览器会直接报
+      「Trailing junk found after the end of the compressed stream」，
+      整段解压失败 —— 表现就是"PDF 里明明有字，却一个字都读不出来"。
+      实测 **deflate-raw 对尾部多余的字节是容忍的**，所以跳过 2 字节 zlib 头
+      按 raw deflate 解：既不用算 adler32，也不怕尾部那点垃圾。 */
+async function inflatePdfStream(bytes) {
+  if (typeof DecompressionStream === 'undefined' || bytes.length < 4) return null;
+  const body = (bytes[0] === 0x78) ? bytes.subarray(2) : bytes;
+  return await inflateWith(body, 'deflate-raw');
+}
+
+/* 扫描件 PDF：整页其实就是一张（或几张）JPEG，没有可复制的文字。
+   好消息是这些 JPEG **原样存在文件里**（/Filter /DCTDecode），可以直接抠出来
+   交给离线识别 —— 不用为此引入整套渲染引擎。
+   只认 JPEG；JPX / 传真压缩那两种浏览器解不了，跳过。 */
+function pdfEmbeddedJpegs(buf) {
+  const u8 = new Uint8Array(buf);
+  let raw = '';
+  for (let i = 0; i < u8.length; i += 0x8000) {
+    raw += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  }
+  const out = [];
+  const re = /\/DCTDecode/g;
+  let m;
+  while ((m = re.exec(raw)) && out.length < 12) {
+    const sIdx = raw.indexOf('stream', m.index);
+    if (sIdx < 0) break;
+    let p = sIdx + 6;
+    if (raw[p] === '\r') p++;
+    if (raw[p] === '\n') p++;
+    const eIdx = raw.indexOf('endstream', p);
+    if (eIdx < 0) break;
+    re.lastIndex = eIdx;
+    // JPEG 一定 FFD8 开头、FFD9 结尾；按这两个魔数把准确边界抠出来
+    let a = p, b2 = eIdx;
+    while (a < b2 - 2 && !(u8[a] === 0xff && u8[a + 1] === 0xd8)) a++;
+    while (b2 > a + 2 && !(u8[b2 - 2] === 0xff && u8[b2 - 1] === 0xd9)) b2--;
+    if (b2 - a < 4096) continue;               // 太小了，多半不是整页图
+    out.push(new Blob([u8.subarray(a, b2)], { type: 'image/jpeg' }));
+  }
+  return out;
+}
+
+/* 抓 PDF 内容流里画字的字符串（老路径，留着给"没有字体映射"的简单 PDF 兜底）：
+   (...) Tj / (...) ' / [...] TJ */
 function pdfRunStrings(s) {
   let out = '';
   const re = /\((?:\\.|[^\\()])*\)/g;
@@ -2432,6 +2490,221 @@ function pdfRunStrings(s) {
     }
   }
   return out + line;
+}
+
+/* ==========================================================================
+   PDF 取字（第二部分）：查字形编号表
+   --------------------------------------------------------------------------
+   为什么光抓 (…) 不够 —— 这是"PDF 明明有字却读不出来"的**另一半原因**：
+   Word / WPS 导出的 PDF 用**子集字体 + Identity-H 编码**，
+   内容流里画的是字形编号：`[<072C>-4<0BC6>] TJ`，不是 ASCII。
+   不查字体自带的 /ToUnicode 表，读出来就是一堆乱码（或者干脆一个字都没有）。
+
+   所以这里做三件事：
+     1) 把每个 /ToUnicode 流找出来，解成「字形编号 → 文字」的表
+     2) 从 /Font << /F1 12 0 R >> 把资源名（F1/F2）对应到字体对象
+     3) 扫内容流：Tf 切字体，(…) 和 <…> 都按当前字体的表翻回文字
+   全程本地，不引 pdf.js（那要多背 1.8MB）。
+   ========================================================================== */
+function pdfLatin1(u8) {
+  let s = '';
+  for (let i = 0; i < u8.length; i += 0x8000) {
+    s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  }
+  return s;
+}
+
+/* 所有 "N 0 obj … endobj" 的起止位置 */
+function pdfObjects(raw) {
+  const out = {};
+  const re = /(\d+)\s+\d+\s+obj\b/g;
+  let m;
+  while ((m = re.exec(raw))) {
+    const s = m.index + m[0].length;
+    const e = raw.indexOf('endobj', s);
+    out[m[1]] = { head: raw.slice(s, e < 0 ? s + 6000 : e), end: e < 0 ? raw.length : e };
+  }
+  return out;
+}
+
+/* 取某个对象里的流（该解压就解压） */
+async function pdfStreamOfObj(raw, objNum, objs) {
+  const o = objs[objNum];
+  if (!o) return null;
+  const at = raw.indexOf(objNum + ' 0 obj');
+  if (at < 0) return null;
+  const sm = /\bstream\r?\n/.exec(raw.slice(at, o.end));
+  if (!sm) return null;
+  const dict = raw.slice(at, at + sm.index);
+  let p = at + sm.index + sm[0].length;
+  const e = raw.indexOf('endstream', p);
+  if (e < 0) return null;
+  const chunk = raw.slice(p, e);
+  if (!/\/FlateDecode/.test(dict)) return chunk;
+  const bytes = new Uint8Array(chunk.length);
+  for (let i = 0; i < chunk.length; i++) bytes[i] = chunk.charCodeAt(i) & 0xff;
+  return (await inflatePdfStream(bytes)) || chunk;
+}
+
+/* 解 /ToUnicode 那张 CMap：beginbfchar + beginbfrange 两种写法 */
+function parseToUnicode(cmap) {
+  const map = {};
+  const dec = hex => {
+    let s = '';
+    for (let i = 0; i + 3 < hex.length + 1; i += 4) {
+      const u = parseInt(hex.substr(i, 4), 16);
+      if (!isNaN(u)) s += String.fromCharCode(u);
+    }
+    return s;
+  };
+  let m;
+  const reC = /beginbfchar([\s\S]*?)endbfchar/g;
+  while ((m = reC.exec(cmap))) {
+    const re2 = /<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]*)>/g;
+    let mm;
+    while ((mm = re2.exec(m[1]))) map[parseInt(mm[1], 16)] = dec(mm[2]);
+  }
+  const reR = /beginbfrange([\s\S]*?)endbfrange/g;
+  while ((m = reR.exec(cmap))) {
+    const re2 = /<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(?:<([0-9A-Fa-f]+)>|\[([\s\S]*?)\])/g;
+    let mm;
+    while ((mm = re2.exec(m[1]))) {
+      const lo = parseInt(mm[1], 16), hi = parseInt(mm[2], 16);
+      if (lo > hi || hi - lo > 65535) continue;
+      if (mm[3] !== undefined) {
+        const base = parseInt(mm[3], 16);
+        for (let c = lo; c <= hi; c++) map[c] = String.fromCharCode(base + (c - lo));
+      } else {
+        (mm[4].match(/<[0-9A-Fa-f]*>/g) || []).forEach((h, k) => {
+          map[lo + k] = dec(h.replace(/[<>]/g, ''));
+        });
+      }
+    }
+  }
+  return map;
+}
+
+/* 资源名（F1/F2…）→「字形编号 → 文字」的表 */
+async function pdfFontMaps(raw) {
+  const objs = pdfObjects(raw);
+  const byName = {};
+  const re = /\/Font\s*<<([\s\S]{0,6000}?)>>/g;
+  let m;
+  while ((m = re.exec(raw))) {
+    const re2 = /\/([A-Za-z0-9_.+-]+)\s+(\d+)\s+\d+\s+R/g;
+    let mm;
+    while ((mm = re2.exec(m[1]))) byName[mm[1]] = mm[2];
+  }
+  const maps = {};
+  const cache = {};
+  for (const nm in byName) {
+    const fo = objs[byName[nm]];
+    if (!fo) continue;
+    const uo = /\/ToUnicode\s+(\d+)\s+\d+\s+R/.exec(fo.head);
+    if (!uo) continue;
+    const key = uo[1];
+    if (!(key in cache)) {
+      const cm = await pdfStreamOfObj(raw, key, objs);
+      cache[key] = cm ? parseToUnicode(cm) : {};
+    }
+    maps[nm] = cache[key];
+  }
+  return maps;
+}
+
+/* 一个 (…) 或 <…> 里的东西 → 文字。
+   ⚠️ 字形编号是 1 字节还是 2 字节，**不能靠"表里有没有大于 255 的键"来猜** ——
+      子集字体的编号可以很小（<0003> 就是第 3 个字形），那样会猜错、整段变空白。
+      所以两种宽度都试一遍，取命中率高、且超过六成的那个。 */
+function pdfDecodeText(tok, map) {
+  if (!tok) return '';
+  const hex = tok[0] === '<';
+  let codes = [];
+  if (hex) {
+    const h = tok.replace(/[^0-9A-Fa-f]/g, '');
+    for (let i = 0; i + 1 < h.length; i += 2) codes.push(parseInt(h.substr(i, 2), 16));
+  } else {
+    const body = tok.slice(1, -1)
+      .replace(/\\([nrtbf()\\])/g, (x, c) => ({ n: '\n', r: '\n', t: '\t', b: '', f: '' }[c] || c))
+      .replace(/\\([0-7]{1,3})/g, (x, o) => String.fromCharCode(parseInt(o, 8)));
+    for (let i = 0; i < body.length; i++) codes.push(body.charCodeAt(i) & 0xff);
+  }
+  if (!codes.length) return '';
+  if (!map) {
+    /* 没有字体表：十六进制串多半是字形编号，硬读是乱码。
+       只有全部落在可见 ASCII 里才当文字用。 */
+    if (hex) {
+      let s = '';
+      for (const c of codes) { if (c < 0x20 || c > 0x7e) return ''; s += String.fromCharCode(c); }
+      return s;
+    }
+    return String.fromCharCode.apply(null, codes);
+  }
+  // 2 字节一组 / 1 字节一组，各试一遍
+  let best = null;
+  for (const width of [2, 1]) {
+    if (codes.length % width) continue;
+    let s = '', hit = 0, n = 0;
+    for (let i = 0; i < codes.length; i += width) {
+      let c = codes[i];
+      if (width === 2) c = (c << 8) | codes[i + 1];
+      n++;
+      if (map[c] !== undefined) { hit++; s += map[c]; }
+    }
+    if (n && (!best || hit > best.hit)) best = { s, hit, n };
+  }
+  if (best && best.hit / best.n >= 0.6) return best.s;
+  return hex ? '' : String.fromCharCode.apply(null, codes);
+}
+
+/* 扫一条内容流：跟 Tf 切字体，收 Tj / TJ 里的文字。
+   ⚠️ 两个都会把结果切碎，必须避开：
+      1) 不能"见一个 Td 就断行" —— PDF 里每个词甚至每个字都可能单独定位一次。
+         所以盯住**基线 y**：只有 y 真的变了才算换行，同一行直接接起来。
+      2) 也不能"见 ET 就断行" —— Word 导出的 PDF 给每一小段文字都套了
+         一对 BT…ET（BT … ET Q q … BT … ET），按 ET 断行会变成一字一行。
+         换行与否只看 y，ET/BT 只当作"清一下临时数字"。
+   ⚠️ 空格只按 TJ 里的字距调整（负数）补，不要按"前后都是字母数字"补 ——
+      后者会把 "2024" 拆成 "2 0 2 4"。 */
+function pdfContentText(content, maps) {
+  if (!/(\bBT\b|\bTj\b|\bTJ\b)/.test(content)) return '';
+  const TOK = /\((?:\\[\s\S]|[^\\()])*\)|<[0-9A-Fa-f\s]*>|-?\d+(?:\.\d+)?|\/([A-Za-z0-9_.+\-]+)|Tf|Tj|TJ|T\*|Td|TD|Tm|ET|BT/g;
+  let cur = null, out = '', line = '', nums = [], lastY = null;
+  let sawStr = false, gap = 0;
+  const flush = () => { if (line.trim()) out += line.trim() + '\n'; line = ''; };
+  let m;
+  while ((m = TOK.exec(content))) {
+    const t = m[0];
+    if (m[1]) { cur = maps[m[1]] || null; nums = []; continue; }   // /F1 资源名
+    if (/^-?\d/.test(t)) { nums.push(parseFloat(t)); continue; }
+    if (t === 'Tm' || t === 'Td' || t === 'TD') {
+      const y = (t === 'Tm') ? nums[nums.length - 1] : (nums[nums.length - 1] || 0);
+      const sameLine = (t === 'Tm')
+        ? (lastY !== null && Math.abs(y - lastY) <= 0.8)
+        : (Math.abs(y) <= 0.8);
+      if (t === 'Tm') lastY = y; else if (lastY !== null) lastY += y;
+      if (!sameLine) flush();
+      nums = []; sawStr = false;
+      continue;
+    }
+    if (t === 'T*') { flush(); nums = []; lastY = null; continue; }
+    if (t === 'ET' || t === 'BT') { nums = []; continue; }         // 只是清临时数字，不断行
+    if (t[0] === '(' || t[0] === '<') {
+      const s = pdfDecodeText(t, cur);
+      if (s) {
+        // TJ 数组里的负数 = 往回推到下一格，通常就是词间空格
+        if (sawStr && gap < -120) line += ' ';
+        line += s;
+      }
+      sawStr = true; gap = 0;
+      continue;
+    }
+    // Tf / Tj / TJ
+    if (nums.length) { gap = nums[nums.length - 1]; }
+    nums = [];
+  }
+  flush();
+  return out;
 }
 
 /* ==========================================================================
@@ -2499,7 +2772,6 @@ function ocrWhyUnavailable(e) {
   }
   return '识别引擎没加载起来（' + ((e && e.message) || '未知原因') + '），多半是网络把它拦住了。';
 }
-
 /* ---------- 一次把若干文件读成文字 ---------- */
 let importReport = null;   // 最近一次导入的结果（成功/失败都留在这儿给用户看）
 let myPanelOpen = false;
@@ -2515,6 +2787,43 @@ async function handleImportFiles(files) {
       importNote(tag + ' 正在读 ' + f.name + '…');
       const r = await readImportFile(f);
       if (r.ok) { chats.push(r.text); continue; }
+      /* 扫描件 PDF：整页是图，逐页离线识别。
+         ⚠️ 站内识别只装了英文模型（使用者是要练英语的，装中文模型要多背十几兆）。
+            中文扫描件会识别不出来，这里要如实说明，别让人以为是坏了。 */
+      if (r.pdfImages) {
+        const pages = r.pdfImages.slice(0, 10);
+        let got = 0;
+        /* 先单独把引擎拉一次：拉不起来就一次性说清原因（多半是在单文件版里），
+           不要每页都报一遍"识别失败"。 */
+        try {
+          await loadOcrLib();
+        } catch (e) {
+          problems.push(f.name + '：这是扫描件（整页是图），要靠文字识别才能读，'
+            + '但 ' + ocrWhyUnavailable(e)
+            + ' 两个办法：把每页截图后用手机相册／微信的「提取文字」，'
+            + '或者改用浏览器里的在线版再传这个 PDF。');
+          continue;
+        }
+        for (let k = 0; k < pages.length; k++) {
+          try {
+            const d = await ocrImage(pages[k], m => importNote(tag + ' 识别第 ' + (k + 1)
+              + '/' + pages.length + ' 页：' + m.status
+              + (m.progress ? ' ' + Math.round(m.progress * 100) + '%' : '')));
+            const v = ocrVerdict(d);
+            if (v.ok) { chats.push(v.text); got++; }
+            else problems.push(f.name + ' 第 ' + (k + 1) + ' 页：' + v.why + '，这一页跳过了。');
+          } catch (e) {
+            problems.push(f.name + '：第 ' + (k + 1) + ' 页识别失败（' + e.message + '），后面的跳过了。');
+            break;
+          }
+        }
+        problems.push(got
+          ? f.name + '：这是扫描件，我按图片识别了 ' + got + '/' + pages.length
+            + ' 页 —— 识别难免有错字，导进来之后做一遍题就能看出来。'
+          : f.name + '：这是扫描件，但站内识别只装了英文模型，'
+            + '里面没读出可用的英文（中文扫描件请用手机相册／微信的「提取文字」转成文字再粘进来）。');
+        continue;
+      }
       if (r.image) {
         try {
           const d = await ocrImage(f, m => importNote(tag + ' 识别中：' + m.status
