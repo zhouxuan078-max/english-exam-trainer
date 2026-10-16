@@ -203,10 +203,23 @@ jobs:
           missing=""
           for f in assets/index.html assets/app.js assets/style.css \
                    assets/data/dict.json assets/data/samples.json assets/data/bank.json \
-                   assets/ocr/tesseract.min.js assets/ocr/eng.traineddata.gz; do
+                   assets/ocr/tesseract.min.js; do
             if grep -q -- "$f" /tmp/ziplist.txt; then echo "  ✓ $f"
             else echo "  ✗ 缺 $f"; missing="$missing $f"; fi
           done
+
+          # ⚠️ 语言数据要查**解压后**的名字。
+          #    AGP 打包时会把 assets 里的 .gz 自动解压掉（APK 本身就是 zip，
+          #    再套一层 gz 没意义），文件名从 eng.traineddata.gz 变成
+          #    eng.traineddata，内容逐字节相同（核对过 md5）。
+          #    前端因此按 gzip:false 去要它，见 app.js 里 IN_SHELL 那一段。
+          #    两种名字有其一就放过，免得 AGP 哪天改了行为又误报挂构建。
+          if grep -qE -- 'assets/ocr/eng\.traineddata(\.gz)?$' /tmp/ziplist.txt; then
+            echo "  ✓ assets/ocr/eng.traineddata（AGP 把它解压了，属正常）"
+          else
+            echo "  ✗ 缺 assets/ocr/eng.traineddata"
+            missing="$missing assets/ocr/eng.traineddata"
+          fi
           if [ -n "$missing" ]; then
             fail "APK 里少了这些站点文件：$missing"
           fi

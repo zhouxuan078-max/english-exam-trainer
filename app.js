@@ -3784,6 +3784,8 @@ function pdfContentText(content, maps) {
    **完全本地计算：不联网、不调用任何 AI 服务、不消耗任何额度。**
    引擎文件放在本站的 ocr/ 目录（约 6.8MB），只有你真的要用图片时才去加载，
    平时一点流量都不花 —— 不用图片的人完全不受影响。
+   ⚠️ 语言数据 eng.traineddata.gz 在安卓壳里会被解压掉、去掉 .gz 后缀，
+      所以 createWorker 的 gzip 参数要按 IN_SHELL 分开 —— 见下面那段注释。
    单文件版（双击打开的那个）里没有 ocr/ 目录，会自动退回
    「请你自己把文字提出来再粘贴」，也就是"方案 1"。
    ========================================================================== */
@@ -3811,7 +3813,15 @@ async function ocrImage(file, onProg) {
       workerPath: 'ocr/worker.min.js',
       corePath: 'ocr/tesseract-core-simd-lstm.wasm.js',
       langPath: 'ocr',
-      gzip: true,
+      /* ⚠️ 安卓壳里必须是 false —— 这是 AGP 的一个很隐蔽的行为：
+         APK 本身就是个 zip，AGP 认为在里面再套一层 gz 没意义，
+         **打包时会自动把 eng.traineddata.gz 解压掉**，名字也顺手去掉 .gz，
+         变成 eng.traineddata（内容就是解压后的原始数据，已逐字节核对过）。
+         壳里要是还按 gzip 去要 .gz，请求直接 404，图片识别整个哑掉 ——
+         而且不报错，就是"点了没反应"，最难查的那种。
+         网页那边文件仍然是 .gz，所以那边必须保持 true。
+         两边共用同一份代码，靠 IN_SHELL 分开。 */
+      gzip: !IN_SHELL,
       cacheMethod: 'none',
       logger: m => { if (onProg && m && m.status) onProg(m); },
     });
