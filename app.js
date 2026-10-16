@@ -1231,11 +1231,6 @@ function vHome() {
     })()}
   </div>
 
-  <div class="card tight">
-    <div class="row" style="margin:0">
-      <button class="btn ghost sm" data-go="me">导入我的题目</button>
-    </div>
-  </div>
 
   <div class="stat-grid">
     <div class="stat"><div class="k">连续打卡</div><div class="v">${streak()} <small>天</small></div></div>
@@ -1258,13 +1253,14 @@ function vHome() {
     <a href="#me" data-go="me"><div class="n">📊 我的</div><div class="d">错题 ${wrong.length} 条</div></a>
   </div>
 
-  <div class="sec">我的题目的进度</div>
+  ${(() => {
+    const p0 = scopeProgress();
+    // 一张卷子都没有时**整节都不显示** —— 不放引导文字，首页保持干净
+    if (!p0.total) return '';
+    return `<div class="sec">我的题目的进度</div>
   <div class="card tight">
     ${(() => {
-      const p = scopeProgress();
-      if (!p.total) {
-        return `<div class="empty">还没有题目。去「我的」把卷子导进来。</div>`;
-      }
+      const p = p0;
       /* 统分：答对的小题数 × 每题分值。
          ⚠️ 每题分值优先用**试卷里标的**，没标才按这场考试的标准。
            所以"只导了一部分题型"时，只会总分变小 —— 仍然是一套卷子。 */
@@ -1279,7 +1275,8 @@ function vHome() {
             p.all ? '（做完了）' : ''}</div>
         <div class="meta" style="margin-top:4px">${scoreTxt}</div>`;
     })()}
-  </div>
+  </div>`;
+  })()}
 
   <div class="sec">各题型做了多少</div>
   <div class="card tight">
