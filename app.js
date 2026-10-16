@@ -4147,20 +4147,19 @@ function vMe() {
       <button class="btn ghost sm" data-myclear="1">清空</button>` : ''}
     </div>
     <div id="mypanel"${myPanelOpen ? ' style="display:block"' : ' style="display:none"'}>
-      <div id="mydrop" class="drop">
-        <div><b>把整份试卷的文件夹拖到这里</b>，或者</div>
-        <div class="row" style="margin:6px 0 0;gap:6px">
-          <label class="btn ghost sm" style="cursor:pointer">
-            选文件夹
-            <input type="file" id="mydir" webkitdirectory directory multiple style="display:none">
-          </label>
-          <label class="btn ghost sm" style="cursor:pointer">
-            选文件
-            <input type="file" id="myfile" multiple
-              accept=".txt,.md,.csv,.tsv,.json,.docx,.pptx,.xlsx,.pdf,image/*"
-              style="display:none">
-          </label>
+      <div id="mydrop" class="drop" style="cursor:pointer" title="点一下选文件夹">
+        <div style="font-size:16px"><b>点这里选文件夹</b></div>
+        <div style="font-weight:400;font-size:13px;color:var(--fg2);margin-top:2px">
+          也可以把整个文件夹直接拖进来
         </div>
+        <input type="file" id="mydir" webkitdirectory directory multiple style="display:none">
+        <label class="meta" style="display:inline-block;margin-top:10px;cursor:pointer;
+          text-decoration:underline">
+          只想选几个文件？点这里
+          <input type="file" id="myfile" multiple
+            accept=".txt,.md,.csv,.tsv,.json,.docx,.pptx,.xlsx,.pdf,image/*"
+            style="display:none">
+        </label>
         <div class="meta" style="margin-top:6px">
           文档 / 表格 / 图片都行，一次可以选好几个。全部在本机读，
           <b>不上传、不联网</b>。
@@ -4446,6 +4445,18 @@ document.addEventListener('change', e => {
    全程在本机完成，不上传。
    拖到页面**任何地方**都收：浏览器默认会把拖进来的文件直接打开（离开本站），
    与其那样不如接住 —— 顺手把「我的题目」面板打开，让人看见东西去哪了。 */
+/* 整个虚线框就是那个"选文件夹"的按钮 ——
+   原来按钮藏在框里，谁也不觉得那能点。现在点框内任何地方都算点它。 */
+document.addEventListener('click', e => {
+  const dz = e.target.closest && e.target.closest('#mydrop');
+  if (!dz) return;
+  if (e.target.closest('label') || e.target.closest('input')) return;
+  // 手机上的 Chrome 不支持"选文件夹"，那就退回选文件
+  const folderOK = 'webkitdirectory' in document.createElement('input');
+  const inp = document.getElementById(folderOK ? 'mydir' : 'myfile');
+  if (inp) inp.click();
+});
+
 /* 改卷子名：输入框就在列表里，失焦或回车就存 —— 不弹文件管理器、也不弹输入框 */
 document.addEventListener('change', e => {
   const el = e.target && e.target.closest && e.target.closest('[data-paperrename]');
