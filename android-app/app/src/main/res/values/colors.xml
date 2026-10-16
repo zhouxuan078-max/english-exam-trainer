@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 和站点 style.css 里的 --brand / --bg 是同一组颜色，别各写各的 -->
+    <color name="shell_brand">#185FA5</color>
+    <color name="shell_bg">#F5F6F8</color>
+    <color name="ic_launcher_background">#185FA5</color>
+</resources>

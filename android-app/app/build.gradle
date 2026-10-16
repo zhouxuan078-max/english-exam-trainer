@@ -1,0 +1,58 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.zhouxuan.englishtrainer'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.zhouxuan.englishtrainer'
+        minSdk 26
+        targetSdk 34
+        /* 由 CI 传进来：-Pvc=<构建序号> -Pvn=1.<构建序号>
+           versionCode 必须是**只增不减**的，不然覆盖安装会被系统拒掉。 */
+        versionCode (project.findProperty('vc') ?: '1').toInteger()
+        versionName (project.findProperty('vn') ?: '1.0')
+    }
+
+    signingConfigs {
+        fixed {
+            storeFile file('../keystore.p12')
+            storeType 'PKCS12'
+            storePassword 'english-exam-trainer'
+            keyAlias 'key0'
+            keyPassword 'english-exam-trainer'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.fixed
+        }
+        /* ⚠️ debug 也**不能**用安卓工具链自动生成的那把钥匙。
+           在干净的构建机上，AGP 每次都会现造一把新的 debug.keystore，
+           于是两次构建签出来的包签名不同 —— 同学想装新版就会「应用未安装」，
+           必须先卸载旧的（答题记录、错题、打卡全跟着没）。
+           固定成同一把钥匙，覆盖安装才是**升级**而不是重装。 */
+        debug {
+            signingConfig signingConfigs.fixed
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+
+dependencies {
+    /* 只用它一个东西：WebViewAssetLoader。
+       作用是把安装包里的本地文件当成一个正经的 https 站点喂给 WebView，
+       见 MainActivity 里的注释（不这样做 fetch 和 localStorage 都会出问题）。 */
+    implementation 'androidx.webkit:webkit:1.11.0'
+}

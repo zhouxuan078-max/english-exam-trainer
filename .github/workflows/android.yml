@@ -1,0 +1,157 @@
+name: 打包安卓安装包
+
+# 在 GitHub 自己的构建机上把站点打包成 APK。
+#
+# 为什么不在本机打：本机没有 JDK / Android SDK，而安卓 SDK 的下载源
+# （dl.google.com）在国内基本拉不动 —— 装一次要跟网络搏斗半天。
+# GitHub 的构建机自带 JDK + 整个 Android SDK，只要推一次代码就出包。
+#
+# 触发：改到站点文件或安卓工程时自动跑；也可以在 Actions 页手动点。
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'index.html'
+      - 'app.js'
+      - 'style.css'
+      - 'data/**'
+      - 'ocr/**'
+      - 'android-app/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+# 挂 Release 需要写权限
+permissions:
+  contents: write
+
+# 两次构建同时改同一个 Release 会打架，排队来
+concurrency:
+  group: android-apk
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # 不用 ./gradlew：仓库里没有 gradle-wrapper.jar（本机没 JDK 生不出来）。
+      # 直接把固定版本的 Gradle 拽下来，省得依赖构建机上预装的是哪个版本。
+      - name: 装 Gradle 8.7
+        run: |
+          curl -sSL -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.7-bin.zip
+          sudo unzip -q /tmp/gradle.zip -d /opt
+          echo "/opt/gradle-8.7/bin" >> "$GITHUB_PATH"
+
+      - name: 认出安卓 SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/platforms" || true
+          ls "$ANDROID_HOME/build-tools" || true
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+
+      # 签名钥匙是 Python 的 cryptography 生成的（本机没有 JDK/keytool）。
+      # 先让 Java 自己读一遍 —— 万一它认不了这份 PKCS12，
+      # 会在这里就报清楚，而不是等到打包最后一步签不上名。
+      - name: 预检签名钥匙
+        run: |
+          keytool -list -v -keystore android-app/keystore.p12 \
+            -storetype PKCS12 -storepass english-exam-trainer | head -20
+
+      - name: 把站里的文件搬进 App
+        run: |
+          rm -rf android-app/app/src/main/assets
+          mkdir -p android-app/app/src/main/assets
+          cp -r index.html app.js style.css data ocr android-app/app/src/main/assets/
+          du -sh android-app/app/src/main/assets
+
+      - name: 打包
+        working-directory: android-app
+        run: |
+          gradle assembleRelease --no-daemon --stacktrace \
+            -Pvc=${{ github.run_number }} -Pvn=1.${{ github.run_number }}
+
+      - name: 取出来并体检
+        run: |
+          mkdir -p out
+          cp android-app/app/build/outputs/apk/release/app-release.apk out/EnglishTrainer.apk
+          ls -lh out/
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* 2>/dev/null | sort -V | tail -1)
+          echo "── 包名 / 版本 ──"
+          "$BT/aapt2" dump badging out/EnglishTrainer.apk 2>/dev/null | head -4 || true
+          echo "── 站点文件在不在里面 ──"
+          unzip -l out/EnglishTrainer.apk > /tmp/ziplist.txt
+          # ⚠️ 故意**不查** data/builtin.json：系统自带的真题只留本机，
+          #    公开仓库里没有它（发布脚本会把公开目录里的副本清掉）。
+          #    写成查它的话，每次构建都会误报缺文件、把构建搞挂。
+          for f in assets/index.html assets/app.js assets/style.css \
+                   assets/data/dict.json assets/data/samples.json assets/data/bank.json \
+                   assets/ocr/tesseract.min.js assets/ocr/eng.traineddata.gz; do
+            if grep -q -- "$f" /tmp/ziplist.txt; then echo "  ✓ $f"; else echo "  ✗ 缺 $f"; exit 1; fi
+          done
+          echo "── 指纹 ──"
+          sha256sum out/EnglishTrainer.apk
+
+      - name: 传成 Actions 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: EnglishTrainer.apk
+          path: out/EnglishTrainer.apk
+          if-no-files-found: error
+
+      # 挂在 Release 上，别人**不用登录**就能下：
+      #   https://github.com/zhouxuan078-max/english-exam-trainer/releases/latest/download/EnglishTrainer.apk
+      # 文件名故意用纯英文 —— 中文名的直链要转码，发给别人很别扭。
+      - name: 挂到 Release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > /tmp/note.md <<'EOF'
+          ## 英语备考训练台 · 安卓版
+
+          **下载下面的 `EnglishTrainer.apk`，传到手机上点开装上就行。**
+          安卓会提示「来自未知来源的应用」，允许一下即可。
+
+          ### 装它有什么好处
+          - 题库、词典、图片识别引擎**全都打包在安装包里**，装上就能用，不联网
+          - 桌面直接有图标，不用记网址、不经过浏览器
+          - 答题记录、错题本、打卡、生词存在 App 自己那儿，
+            **不会被「清除浏览器缓存」带走**
+
+          ### 说明
+          - 不申请通讯录 / 短信 / 相机 / 存储等任何敏感权限
+          - 想更新：下载新版 APK **直接覆盖安装**即可，数据会保留
+            （签名是固定的，所以能覆盖；不用先卸载）
+          - 手机上打不开 GitHub 的话，用电脑先下好，再用微信 / QQ 传过去
+
+          ### 保存文件去哪儿了
+          在 App 里导出的 CSV / Anki / 备份文件，保存在
+          **「内部存储 → Download → 英语备考训练台」** 文件夹里。
+          EOF
+          gh release view apk-latest >/dev/null 2>&1 \
+            || gh release create apk-latest --title "英语备考训练台 · 安卓安装包（最新版）" --notes-file /tmp/note.md
+          gh release upload apk-latest out/EnglishTrainer.apk --clobber
+          gh release edit apk-latest --title "英语备考训练台 · 安卓安装包（最新版）" --notes-file /tmp/note.md
+
+      - name: 写个摘要
+        if: always()
+        run: |
+          {
+            echo "### 打包结果"
+            echo ""
+            echo "- 版本：1.${{ github.run_number }}"
+            if [ -f out/EnglishTrainer.apk ]; then
+              echo "- 体积：$(du -h out/EnglishTrainer.apk | cut -f1)"
+              echo "- 直链：https://github.com/zhouxuan078-max/english-exam-trainer/releases/latest/download/EnglishTrainer.apk"
+            else
+              echo "- **没有产出 APK**，看上面的日志"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

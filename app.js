@@ -612,6 +612,13 @@ const LS = {
   }
 };
 
+/* 是不是装在安卓 App 壳里跑（见仓库里的 android-app/）。
+   ⚠️ 在**脚本加载那一刻**判一次就够了 —— 壳是在 loadUrl 之前用
+      addJavascriptInterface 挂上来的，不存在"晚一步才出现"的情况。
+      网页里 window.AndroidShell 是 undefined，所以下面这些分支在线上站
+      一个都不会走，两边同一份代码。 */
+const IN_SHELL = !!(window.AndroidShell && window.AndroidShell.saveText);
+
 /* ---------- 「这场考试自己的数据」----------
    ⚠️ 全部必须**按考试分开**，否则换考试就会留下上一场的痕迹。
       用户的要求原话是"这些考试都应该有自己独立的东西，
@@ -821,7 +828,22 @@ function addDays(dateStr, n) {
   return ymd(new Date(p[0], p[1] - 1, p[2] + n));
 }
 function download(text, name, type) {
-  const blob = new Blob([text], { type });
+  const mt = type || 'application/octet-stream';
+  /* ⚠️ 安卓 App（WebView 壳）里 `<a download>` 点了是**没反应**的 ——
+     WebView 不接手 blob: 的下载，既不弹「保存」，也不报错，静悄悄地什么都不发生。
+     导出 CSV / 导出 Anki / 导出备份 全靠这个函数，所以在壳里必须改走原生。
+     壳那边挂了一个叫 AndroidShell 的桥；**浏览器里 window.AndroidShell 是 undefined**，
+     于是照旧走下面那条网页路径 —— 两边同一份代码，谁也不用改。 */
+  try {
+    const be = window.AndroidShell;
+    if (be && typeof be.saveText === 'function') {
+      const msg = String(be.saveText(name, mt, text) || '');
+      if (msg) toast(msg);
+      return;
+    }
+  } catch (e) { /* 桥坏了就退回网页那条路，别让导出整个卡死 */ }
+
+  const blob = new Blob([text], { type: mt });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = name;
@@ -1960,6 +1982,114 @@ function exportCSV() {
   const lines = ['word,phonetic,meaning'];
   for (const v of vocab) lines.push([q(v.word), q(v.phon), q(v.mean)].join(','));
   download('\ufeff' + lines.join('\r\n'), '生词_' + examShort() + '.csv', 'text/csv;charset=utf-8');
+}
+
+/* ---------- 备份 / 还原：把全部本地数据整包带走 ----------
+
+   为什么非得有这一块：
+
+   站里所有东西都存在**这台设备的浏览器本地存储**里 —— 答题记录、错题本、
+   打卡、生词、划线、自己导入的题库和卷子、选的哪场考试。
+   而「清除浏览数据」正是把这块存储整个抹掉的操作，谁也拦不住。
+   （iPhone 上还有一条：累计 7 个 Safari 使用日没打开过这个站，系统也会清。）
+
+   问题是**现有的出口只盖住了一小半**：
+     · 生词本      → 导出 CSV / 导出 Anki   ✓
+     · 我的题目    → 导出（可以传给别人）   ✓
+     · 答题记录 / 错题本 / 打卡 / 划线      → **一个出口都没有**  ✗
+   这几样一旦被清掉，是真的一点都找不回来。所以补一个「整包导出 → 整包还原」。
+
+   ⚠️ 两个设计上的取舍：
+     1) 只认 `cet4:` 开头的键。备份文件就是个记事本能打开的 json，
+        不加这道闸，一份被人手改过的文件就能往站里塞任意键。
+     2) 还原完**整页重载**，不是只调一次 render()。原因见 doRestore 里的注释。 */
+const BACKUP_APP = '英语备考训练台';
+const BACKUP_VER = 1;
+
+function backupPayload() {
+  const data = {};
+  let n = 0;
+  LS.keys('').forEach(k => {
+    let v = null;
+    try { v = localStorage.getItem(k); } catch (e) { v = null; }
+    if (v == null) return;
+    data[k] = v; n++;
+  });
+  let ex = '';
+  try { ex = curExam().id || ''; } catch (e) { }
+  return {
+    app: BACKUP_APP, ver: BACKUP_VER, exportedAt: new Date().toISOString(),
+    exam: ex, count: n, data: data,
+  };
+}
+
+/* 纯校验 + 规整：不碰 localStorage，好单独验。
+   返回 { ok, msg, count, data, exportedAt } */
+function backupRead(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+    return { ok: false, msg: '这不是一个备份文件' };
+  }
+  if (obj.app !== BACKUP_APP) {
+    return { ok: false, msg: '这不是「' + BACKUP_APP + '」的备份文件' };
+  }
+  const src = obj.data;
+  if (!src || typeof src !== 'object' || Array.isArray(src)) {
+    return { ok: false, msg: '这个备份文件里没有数据' };
+  }
+  const out = {};
+  let n = 0;
+  Object.keys(src).forEach(k => {
+    if (k.indexOf('cet4:') !== 0) return;      // 前缀闸，见上面第 1 条
+    if (typeof src[k] !== 'string') return;    // 本地存的一律是 JSON.stringify 出来的字符串
+    out[k] = src[k]; n++;
+  });
+  if (!n) return { ok: false, msg: '这个备份文件里没有可用的数据' };
+  return { ok: true, count: n, data: out,
+           exam: obj.exam || '', exportedAt: obj.exportedAt || '' };
+}
+
+function backupName() {
+  let ex = '';
+  try { ex = curExam().id || ''; } catch (e) { }
+  return '英语备考训练台_备份_' + today() + (ex ? '_' + ex : '') + '.json';
+}
+
+function doBackup() {
+  const p = backupPayload();
+  if (!p.count) { toast('这里还没有数据可以备份'); return; }
+  download(JSON.stringify(p, null, 1), backupName(), 'application/json;charset=utf-8');
+  toast('已导出 ' + p.count + ' 项，收好这个文件');
+}
+
+function doRestore(text) {
+  let obj = null;
+  try { obj = JSON.parse(text); } catch (e) { toast('这个文件读不出来（不是 json）'); return; }
+  const r = backupRead(obj);
+  if (!r.ok) { toast(r.msg); return; }
+  const when = r.exportedAt ? String(r.exportedAt).slice(0, 10) : '未知日期';
+  if (!confirm('这份备份是 ' + when + ' 的，共 ' + r.count + ' 项。\n\n'
+    + '还原会覆盖这台设备现有的答题记录、错题、打卡、生词、划线和导入的题库。\n'
+    + '确定要还原吗？')) return;
+  let n = 0;
+  Object.keys(r.data).forEach(k => {
+    try { localStorage.setItem(k, r.data[k]); n++; } catch (e) { }
+  });
+  if (!n) { toast('写入失败（可能是隐私模式下不让写）'); return; }
+  /* ⚠️ 写完必须**整页重载**，不能只 render()。
+     内存里挂着一大堆跟着当前状态走的变量 —— marks / prog / vocab / wrong /
+     draft / vQueue / onboarding / scopedFor —— 而备份很可能把「选了哪场考试」
+     整个换掉，那些变量就全对不上了，页面上会出现"数据串场"。
+     重载一次最省事，也最不会错。 */
+  toast('已还原 ' + n + ' 项，正在重新载入…');
+  setTimeout(() => { try { location.reload(); } catch (e) { } }, 600);
+}
+
+function restoreFromFile(f) {
+  if (!f) return;
+  const fr = new FileReader();
+  fr.onload = () => doRestore(String(fr.result || ''));
+  fr.onerror = () => toast('文件读取失败');
+  fr.readAsText(f, 'utf-8');
 }
 
 /* ---------- 我的题目（使用者自己导入，只存在他自己浏览器里） ----------
@@ -4813,10 +4943,11 @@ function vMe() {
       </div>
       <div id="myraw"${myRawOpen ? ' style="display:block"' : ' style="display:none"'}>
 
-      <div id="mydrop" class="drop" style="cursor:pointer" title="点一下选文件夹">
-        <div style="font-size:16px"><b>点这里选文件夹</b></div>
+      <div id="mydrop" class="drop" style="cursor:pointer"
+        title="${IN_SHELL ? '点一下选文件' : '点一下选文件夹'}">
+        <div style="font-size:16px"><b>${IN_SHELL ? '点这里选文件' : '点这里选文件夹'}</b></div>
         <div style="font-weight:400;font-size:13px;color:var(--fg2);margin-top:2px">
-          也可以把整个文件夹直接拖进来<br>
+          ${IN_SHELL ? '安卓 App 里一次可以选好几个文件' : '也可以把整个文件夹直接拖进来'}<br>
           <span style="color:var(--fg3)">Word（.docx）最稳；PDF 排版复杂，读不出时请转成 .docx</span>
         </div>
         <input type="file" id="mydir" webkitdirectory directory multiple style="display:none">
@@ -4834,6 +4965,25 @@ function vMe() {
       </div>
 
       </div>
+    </div>
+  </div>
+
+  <div class="sec">数据备份</div>
+  <div class="card tight">
+    <div class="meta" style="margin-top:0">
+      答题记录、错题、打卡、生词、划线、导入的题库，全都只存在这台设备里。
+      <b>换手机、清缓存、想搬到另一台设备</b>，都靠下面这个文件。
+    </div>
+    <div class="row" style="margin:10px 0 0">
+      <button class="btn ghost sm" data-backup="1">导出备份</button>
+      <label class="btn ghost sm" style="cursor:pointer;margin:0">
+        还原备份
+        <input type="file" id="bkfile" accept=".json,application/json" style="display:none">
+      </label>
+    </div>
+    <div class="meta" style="margin-top:6px">
+      还原会<b>覆盖</b>这台设备现有的数据。存下来的那个文件留着，
+      比什么都保险 —— 它就是这个站的全部家当。
     </div>
   </div>
 
@@ -5095,8 +5245,12 @@ document.addEventListener('click', e => {
   const dz = e.target.closest && e.target.closest('#mydrop');
   if (!dz) return;
   if (e.target.closest('label') || e.target.closest('input')) return;
-  // 手机上的 Chrome 不支持"选文件夹"，那就退回选文件
-  const folderOK = 'webkitdirectory' in document.createElement('input');
+  /* 手机上的 Chrome 不支持"选文件夹"，那就退回选文件。
+     ⚠️ App 壳里同样要退回：`'webkitdirectory' in input` 在那儿是 **true**
+        （属性是有的），但安卓的系统文件选择器根本没有"选一个文件夹"这回事，
+        照它选就会弹一个平平无奇的选文件框 —— 文字和实际行为对不上，
+        比直接说"选文件"更让人困惑。 */
+  const folderOK = !IN_SHELL && ('webkitdirectory' in document.createElement('input'));
   const inp = document.getElementById(folderOK ? 'mydir' : 'myfile');
   if (inp) inp.click();
 });
@@ -5767,6 +5921,7 @@ document.addEventListener('click', e => {
       wrong = []; LS.set(scopeKeys().wrong, wrong); render();
     } return;
   }
+  if (e.target.closest('[data-backup]')) { doBackup(); return; }
   if (e.target.closest('[data-resetall]')) {
     if (confirm('清空全部本地数据？答题记录、错题、生词、打卡、'
       + '你自己导入的题目、以及选的考试，都会没。')) {
@@ -5786,6 +5941,19 @@ document.addEventListener('click', e => {
       render();
       toast('已清空，重新选一个考试吧');
     } return;
+  }
+});
+
+/* 选了备份文件 → 直接还原（还原前 doRestore 里还会再确认一次） */
+document.addEventListener('change', e => {
+  if (!e.target) return;
+  if (e.target.id === 'bkfile') {
+    const bf = e.target.files && e.target.files[0];
+    /* ⚠️ 用完必须清空 value：不清的话，第二次选**同一个文件**不会再触发 change，
+       使用者会以为"点了没反应"。 */
+    try { e.target.value = ''; } catch (err) { }
+    restoreFromFile(bf);
+    return;
   }
 });
 
