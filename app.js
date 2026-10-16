@@ -1073,6 +1073,44 @@ function rangeFromOffsets(root, s, e) {
   return r;
 }
 
+/* 给一段区间套一个 <span class="ulr">，让"划线"真的看得见。
+
+   ⚠️⚠️ 为什么非要有这一层（这是"手机上划线消失"的真因）
+
+   下划线原来有两条路，两条都有死角：
+     ① CSS Custom Highlight（::highlight(ul)）—— 只有比较新的浏览器有。
+        这条 API 在国产手机浏览器 / 老 WebView 上普遍还没有。
+     ② 逐词给 `.w` 加 `.ul` —— 而 `.w` 只包**本地词库收录的词**（见 wrap()）。
+        于是：普通词不划、中文一个字都划不出来、
+        跨词片段只划出其中恰好在词库里的那一两个词。
+   实测（把 Highlight API 关掉）：划 "quick brown fox" 15 个字符，
+   只有 "fox" 这 3 个显示出来；划一段中文，屏幕上什么都没有。
+   ——看起来就是"划线功能坏了"。
+
+   所以这里补第三条路：**按字符区间直接把文字包起来**，不依赖任何高级 API。
+   它和 ①② 不冲突，只把漏掉的部分补齐。
+
+   实现上两个坑：
+   · `surroundContents` 在"区间只覆盖某个元素的一部分"时会抛 InvalidStateError
+     —— 划到词元中间就是这种情况，非常常见，所以必须有退路。
+   · 包 span **不改变文字**，因此字符偏移全程保持有效；
+     但为了不去动还没处理的区间，仍然从后往前包。 */
+function wrapRangeUnderline(rg) {
+  if (!rg || rg.collapsed) return false;
+  const span = document.createElement('span');
+  span.className = 'ulr';
+  try {
+    rg.surroundContents(span);
+    return true;
+  } catch (e) { /* 跨元素边界（比如划进了一个词元中间），走下面的退路 */ }
+  try {
+    const frag = rg.extractContents();
+    span.appendChild(frag);
+    rg.insertNode(span);
+    return true;
+  } catch (e) { return false; }
+}
+
 /* 选一段 → 划上；选到**已经有划线的地方** → 取消那一部分。
    ⚠️ 判断标准是"有没有重叠"，不是"是否一模一样" ——
       拖选很难选到字符级完全相同（通常差一个空格、少一个字），
@@ -1158,6 +1196,19 @@ function applyMarks() {
       CSS.highlights.set('ul', hl);
     }
   }
+
+  /* 第三条路：按字符区间把文字包进 .ulr。
+     ★ 前面两条路各有死角（见 wrapRangeUnderline 上面那段说明），
+       这一条才是"到哪都看得见"的那条 —— 普通词、中文、跨词片段全靠它。
+     放在最后做：①② 都基于"还没被包装过"的干净 DOM，
+     而包装不改文字，所以这里的偏移依然对得上。
+     倒序处理只是为了万一将来包装改成会动文字时也不出岔子。 */
+  rs.slice().sort((a, b) => (b.c || 0) - (a.c || 0) || b.s - a.s).forEach(r => {
+    const root = conts[r.c || 0];
+    if (!root) return;
+    wrapRangeUnderline(rangeFromOffsets(root, r.s, r.e));
+  });
+
   if (!ctx) return;
   const m = marks[ctx.key];
   if (!m) return;
@@ -1949,28 +2000,14 @@ Should the library stay open longer during the exam period? I believe it should.
    ⚠️ 这份提示词**必须和解析器严格对齐**：它教 AI 写的每个分节标题，
       都必须是 sectionTypeOf() 真认得的。自测里有一条断言逐条核对
       （PROMPT_TITLES 里的每个名字都要能映射到题型），改了一边忘了另一边会报红。 */
-const PROMPT_TITLES = ['仔细阅读', '长篇匹配', '选词填空', '单项选择', '判断题',
+const PROMPT_TITLES = ['仔细阅读', '长篇匹配', '选词填空', '填空题', '单项选择', '判断题',
   '听力理解', '听力听写', '写作', '翻译', '口语', '数学'];
 
-function aiPromptText() {
-  const ex = curExam();
-  const list = paperOf(ex, null).map(r => r.label).join('、');
-  return `帮我把下面这份英语试卷，转成「英语备考训练台」能直接导入的纯文本格式。
-
-【三条硬规矩】
-1. 只做转写。不要改题、不要补题、不要翻译、不要替我加解析。
-2. 忠实原文。题号、选项、答案、原文一律照抄；选项有几个就写几个，一个都不能漏。
-3. 材料里没有的就别编 —— 没有答案就不要写 ANSWER 那一行。
-
-【输出要求】
-· 一种题型一段，用 === 题型名 === 隔开（前后各两个等号，两端顶格写）。
-· 只输出这段文本本身：不要开头寒暄、不要结尾总结、不要用代码块围起来。
-· 题型名只能从下面这份清单里挑，照抄，别自己另起名字：
-  仔细阅读 / 长篇匹配 / 选词填空 / 单项选择 / 判断题 / 听力理解 / 听力听写 / 写作 / 翻译 / 口语 / 数学
-
-【每种题型怎么写】
-
-=== 仔细阅读 ===          一段文章 + 几道四选一
+/* 每种题型"该怎么写"的示例。key 就是分节标题本身。
+   ⚠️ key 必须和 PROMPT_TITLES 里的名字一字不差 —— promptBlocksFor() 是按名字取的，
+      取不到会被挡下来（宁可报错，也不要悄悄少给一段写法，那样 AI 只能瞎猜）。 */
+const PROMPT_BLOCKS = {
+  '仔细阅读': `=== 仔细阅读 ===          一段文章 + 几道四选一
 TITLE: 卷子名 · 仔细阅读
 PASSAGE:
 文章第一段
@@ -1982,9 +2019,9 @@ B. 选项二
 C. 选项三
 D. 选项四
 ANSWER: B
-EXPLAIN: 解析（没有就不写这一行）
+EXPLAIN: 解析（没有就不写这一行）`,
 
-=== 听力理解 ===          播报稿 + 题目
+  '听力理解': `=== 听力理解 ===          播报稿 + 题目
 TITLE: 卷子名 · 听力理解
 SCRIPT:
 把听力原文（播报稿）整段写在这里，可以有多行
@@ -1993,16 +2030,27 @@ A. 选项一
 B. 选项二
 C. 选项三
 D. 选项四
-ANSWER: A
+ANSWER: A`,
 
-=== 选词填空 ===
+  '选词填空': `=== 选词填空 ===
 TITLE: 卷子名 · 选词填空
 PASSAGE:
 把文章里每个空写成 {{1}} {{2}} {{3}}，空按顺序编号
 OPTIONS: 备选词一 备选词二 备选词三 备选词四
-ANSWERS: 1:答案词 2:答案词 3:答案词
+ANSWERS: 1:答案词 2:答案词 3:答案词`,
 
-=== 长篇匹配 ===
+  /* 填空题和选词填空共用一套写法，只差 OPTIONS 那一行 ——
+     给了备选词就变成"选词填空"，不给就是"填空题"。
+     雅思 / PTE / 多邻国 / GRE 都在考它，原来这份提示词里压根没提，
+     于是那几个考试导入填空部分时，AI 只能自己编一个格式，多半导不进来。 */
+  '填空题': `=== 填空题 ===
+TITLE: 卷子名 · 填空题
+PASSAGE:
+把文章里每个空写成 {{1}} {{2}} {{3}}，空按顺序编号
+ANSWERS: 1:答案词 2:答案词 3:答案词
+（填空题**不要**写 OPTIONS 那一行 —— 写了就变成"选词填空"了）`,
+
+  '长篇匹配': `=== 长篇匹配 ===
 TITLE: 卷子名 · 长篇匹配
 PARAGRAPHS:
 A. 第一段正文
@@ -2011,42 +2059,104 @@ C. 第三段正文
 STATEMENTS:
 - 句子原文 | A
 - 句子原文 | C
-（竖线后面写这句属于哪一段）
+（竖线后面写这句属于哪一段）`,
 
-=== 写作 ===
+  '写作': `=== 写作 ===
 TITLE: 卷子名 · 写作
 MATERIAL: 题目要求（照抄题干）
 POINTS:
 - 要点一
 - 要点二
 SAMPLE:
-范文正文
+范文正文`,
 
-=== 翻译 ===
+  '翻译': `=== 翻译 ===
 TITLE: 卷子名 · 翻译
 MATERIAL: 中文原文
-REFERENCE: 参考答案
+REFERENCE: 参考答案`,
 
-=== 判断题 ===           写法和仔细阅读一样，选项固定是 True / False / Not Given
+  '判断题': `=== 判断题 ===           写法和仔细阅读一样，选项固定是 True / False / Not Given`,
 
-=== 单项选择 ===         只有一道道题、没有文章，用 Q: / A. / ANSWER: 那一套
+  '单项选择': `=== 单项选择 ===         只有一道道题、没有文章，用 Q: / A. / ANSWER: 那一套`,
 
-=== 听力听写 ===
+  '听力听写': `=== 听力听写 ===
 TITLE: 卷子名 · 听力听写
-- 一句一行，一行只写一句英文
+- 一句一行，一行只写一句英文`,
 
-=== 口语 ===
+  '口语': `=== 口语 ===
 TITLE: 卷子名 · 口语
 MATERIAL: 题目要求
-SECONDS: 60
+SECONDS: 60`,
 
-=== 数学 ===             GRE 数量推理，写法和单项选择一样
+  '数学': `=== 数学 ===             GRE 数量推理，写法和单项选择一样  /* 这块下面单独一行非空行 */
+`,
+};
+/* ⚠️ 上面「数学」那块最后多留了一个换行：它是单行说明，不给个空行的话
+   和下一段会连成一整块，模型容易误以为那是同一段的内容。 */
 
-【这张卷子是哪场考试的】
-它是一场「${ex.name}」的试卷，这场考试考的题型是：${list || '不限'}。
-材料里有什么就转什么，不用凑齐 —— 只转阅读、没转听力也是完全可以的。
-你手上如果只有听力的播报稿、没有音频，照样按「听力理解」写下来，
-站里会把播报稿显示出来，只是听不到声音。
+/* 这场考试该让 AI 转哪几种题型。
+
+   ⚠️⚠️ 为什么必须按考试过滤（原来不分，是这个功能最大的毛病）
+   这一段原来是把 11 种题型**全列一遍**，写在模板里写死的 ——
+   于是选四级、选雅思、选 GRE，复制出来的提示词一模一样。后果两个：
+     · 模型被无关题型带着跑，容易把一段普通文章硬塞进"长篇匹配"的格式；
+     · 这场考试真正要练的题型（雅思/PTE/GRE 的填空题）反而一个字都没交代。
+   使用者原话：「AI辅助导入文件的功能没有依据不同考试发生提示词的改变」。
+
+   清单来源是**试卷结构**（typesOf），不是另抄一份 ——
+   因为 paper 才是"这场考试考什么"的唯一来源（见 QTYPES 上面那段硬规矩）。
+   再按 PROMPT_TITLES 的固定顺序排，让同一场考试每次拿到的提示词完全一致。 */
+function promptTitlesFor(ex) {
+  ex = ex || curExam();
+  const have = typesOf(ex, null);
+  const picked = PROMPT_TITLES.filter(t => {
+    const id = sectionTypeOf(t);
+    return !!id && have.indexOf(id) >= 0;
+  });
+  /* 兜底：结构里一个能对上的题型都没有（比如新加的考试还没配 paper）时，
+     宁可把全部写法都给出去，也不能给一份"什么都没说"的提示词。 */
+  return picked.length ? picked : PROMPT_TITLES.slice();
+}
+
+function promptBlocksFor(titles) {
+  const out = [];
+  titles.forEach(t => {
+    /* 取不到就跳过，而不是塞个 undefined 进去 —— 那样整段提示词会出现
+       一行 "undefined"，模型很可能照着那行瞎编一个分节。 */
+    if (PROMPT_BLOCKS[t]) out.push(PROMPT_BLOCKS[t]);
+  });
+  return out.join('\n\n');
+}
+
+function aiPromptText() {
+  const ex = curExam();
+  const list = paperOf(ex, null).map(r => r.label).join('、');
+  const titles = promptTitlesFor(ex);
+  return `帮我把下面这份英语试卷，转成「英语备考训练台」能直接导入的纯文本格式。
+
+【先说清楚这场考试】
+这是一场「${ex.name}」的试卷，卷面由这几块组成：${list || '不限'}。
+所以这份材料里**只应该有下面这 ${titles.length} 种题型**。
+
+【三条硬规矩】
+1. 只做转写。不要改题、不要补题、不要翻译、不要替我加解析。
+2. 忠实原文。题号、选项、答案、原文一律照抄；选项有几个就写几个，一个都不能漏。
+3. 材料里没有的就别编 —— 没有答案就不要写 ANSWER 那一行。
+
+【题型名只能从这份清单里挑，照抄，别自己另起名字】
+${titles.join(' / ')}
+
+⚠️ 材料里如果冒出一个不在上面的题型，**宁可丢掉那一块，也不要硬塞进别的题型**。
+   （最常犯的错：把一段普通长文写成"长篇匹配"。那两种题的正文结构完全不同。）
+
+【输出要求】
+· 一种题型一段，用 === 题型名 === 隔开（前后各两个等号，两端顶格写）。
+· 只输出这段文本本身：不要开头寒暄、不要结尾总结、不要用代码块围起来。
+· 材料里有什么就转什么，不用凑齐 —— 只转了阅读、没转写作，也是完全可以的。
+
+【每种题型怎么写】
+
+${promptBlocksFor(titles)}
 
 【材料在下面 / 在附件里】`;
 }
@@ -5271,37 +5381,161 @@ function selOffset(root, node, offset) {
   pre.setEnd(node, offset);
   return pre.toString().length;
 }
+/* 从当前选区算出「划的是第几个可划线容器、哪一段」。
+   返回 null = 这个选区不该划线（不在任何容器里，或者选的全是空白）。 */
+function selectionTarget() {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+  const r = sel.getRangeAt(0);
+  const conts = ulContainers();
+  for (let k = 0; k < conts.length; k++) {
+    const el = conts[k];
+    if (el.contains(r.startContainer) && el.contains(r.endContainer)) {
+      const txt = r.toString();
+      if (!txt.trim()) return null;
+      const s = selOffset(el, r.startContainer, r.startOffset);
+      return { c: k, s: s, e: s + txt.length, text: txt };
+    }
+  }
+  return null;
+}
+
+/* 这一段是不是已经整段都划上了 —— 决定浮层按钮上写「划线」还是「取消划线」。 */
+function rangeFullyMarked(key, c, s, e) {
+  const m = marks[key];
+  if (!m || !Array.isArray(m.r) || !m.r.length || e <= s) return false;
+  const cov = new Array(e - s).fill(false);
+  m.r.forEach(r => {
+    if ((r.c || 0) !== c) return;
+    for (let i = Math.max(r.s, s); i < Math.min(r.e, e); i++) cov[i - s] = true;
+  });
+  return cov.every(Boolean);
+}
+
+/* ---------- 浮层那个「划线」按钮 ----------
+   ⚠️⚠️ 为什么必须有它（"手机上只能一个个词划线"的真因）
+
+   手机上的选区是这么来的：**长按先选中一个词**，然后浏览器把两个把手摆出来，
+   用户拖把手才能把范围扩大 —— 整个过程里 touchend 会响好几次。
+
+   原来的做法是"一发现选区就立刻划上、并且把选区清掉"。于是：
+   长按 → 词选中 → touchend → 立刻划上 + 选区被清 → 把手消失。
+   用户根本来不及拖，看到的就是"一次只能划一个词"，
+   而拖选大范围这件事在手机上**永远做不到**。
+
+   所以触摸设备改成先浮一个按钮出来，等用户把把手拖好、自己点一下才算数。
+   鼠标设备不用这么绕（拖选一次就到位），保持"松手即划"。
+   ---------------------------------------------------------------- */
+
+/* 待确认的区间。必须在这里存下来 ——
+   手指点在按钮上那一刻浏览器多半已经把选区收掉了，
+   点的时候再读一次 getSelection() 会读到空。 */
+let ulPending = null;
+let ulBtn = null;
+
+function hideUlBtn() {
+  ulPending = null;
+  if (ulBtn) { ulBtn.remove(); ulBtn = null; }
+}
+
+function paintUlBtn(t, key) {
+  if (!ulBtn) {
+    ulBtn = document.createElement('button');
+    ulBtn.type = 'button';
+    ulBtn.id = 'ul-apply';
+    document.body.appendChild(ulBtn);
+  }
+  ulPending = { key: key, c: t.c, s: t.s, e: t.e };
+
+  const already = rangeFullyMarked(key, t.c, t.s, t.e);
+  ulBtn.dataset.add = already ? '0' : '1';
+  ulBtn.textContent = already ? '取消划线' : '划线';
+
+  /* 贴着选区放，够不着拇指就白搭。上面放不下就翻到下面。 */
+  let rect = null;
+  try {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount) rect = sel.getRangeAt(0).getBoundingClientRect();
+  } catch (e) { /* 拿不到就退回左上角 */ }
+  const W = 104, H = 40;
+  let x = 12, y = 12;
+  if (rect && (rect.width || rect.height)) {
+    x = rect.left + rect.width / 2 - W / 2;
+    y = rect.top - H - 10;
+    if (y < 8) y = rect.bottom + 10;
+  }
+  x = Math.max(8, Math.min(x, window.innerWidth - W - 8));
+  y = Math.max(8, Math.min(y, window.innerHeight - H - 8));
+  ulBtn.style.left = Math.round(x) + 'px';
+  ulBtn.style.top = Math.round(y) + 'px';
+}
+
+function offerUnderline() {
+  const ctx = curReadItem();
+  if (!ctx) { hideUlBtn(); return; }
+  const t = selectionTarget();
+  if (!t) { hideUlBtn(); return; }
+  paintUlBtn(t, ctx.key);
+}
+
+/* 触摸设备 —— 判断放在外面：它不会变，没必要每次绑定都算一遍 */
+const IS_TOUCH = (typeof window !== 'undefined') &&
+  (('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0);
+
 function bindSelectUnderline() {
-  ['mouseup', 'touchend'].forEach(ev => document.addEventListener(ev, e => {
+  if (IS_TOUCH) {
+    /* 等用户把把手拖好：选区每变一次就重新计时，停下来 420ms 才浮出按钮。
+       拖的过程中不浮 —— 不然按钮会跟着手指抖。 */
+    let timer = null;
+    document.addEventListener('selectionchange', () => {
+      if (route.indexOf('type:') !== 0) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (route.indexOf('type:') === 0) offerUnderline();
+      }, 420);
+    });
+    /* 手指按到别处 / 页面滚了，就把按钮收掉 */
+    document.addEventListener('touchstart', e => {
+      if (!e.target.closest || !e.target.closest('#ul-apply')) hideUlBtn();
+    }, true);
+    document.addEventListener('scroll', hideUlBtn, true);
+    return;
+  }
+
+  /* 鼠标：拖选一次就到位，松手即划，不用多按一下 */
+  document.addEventListener('mouseup', () => {
     if (route.indexOf('type:') !== 0) return;
     const ctx = curReadItem();
     if (!ctx) return;
     setTimeout(() => {                       // 等浏览器把选区定下来
+      const t = selectionTarget();
+      if (!t) return;
       const sel = window.getSelection();
-      if (!sel || !sel.rangeCount || sel.isCollapsed) return;
-      const r = sel.getRangeAt(0);
-      // 看这段选区落在第几个可划线容器里（短文 / 段落 / 题干都算）
-      const conts = ulContainers();
-      let ci = -1, pEl = null;
-      for (let k = 0; k < conts.length; k++) {
-        const el = conts[k];
-        if (el.contains(r.startContainer) && el.contains(r.endContainer)) {
-          ci = k; pEl = el; break;
-        }
-      }
-      if (ci < 0) return;
-      const txt = r.toString();
-      if (!txt.trim()) return;
-      const s = selOffset(pEl, r.startContainer, r.startOffset);
-      const added = toggleRangeMark(ctx.key, ci, s, s + txt.length);
-      sel.removeAllRanges();
+      const added = toggleRangeMark(ctx.key, t.c, t.s, t.e);
+      if (sel) sel.removeAllRanges();
       // 重渲染（而不是只 applyMarks）：让头部的「清除划线」立刻出现。
       // 这里已经清掉选区了，重渲染不会丢焦点。
       render();
       toast(added ? '已划线（选到划线的地方可以取消）' : '已取消这一段划线');
     }, 10);
-  }));
+  });
 }
+
+/* 浮层那个按钮被点中。
+   ⚠️ 用 ulPending 里记下的区间，而不是现读一次选区 ——
+      手指落在按钮上的时候，浏览器多半已经把选区收掉了，
+      再读 getSelection() 会读到空，表现成"点了没反应"。 */
+document.addEventListener('click', e => {
+  if (!e.target.closest || !e.target.closest('#ul-apply')) return;
+  const p = ulPending;
+  if (!p) { hideUlBtn(); return; }
+  const added = toggleRangeMark(p.key, p.c, p.s, p.e);
+  const sel = window.getSelection();
+  if (sel) sel.removeAllRanges();
+  hideUlBtn();
+  render();
+  toast(added ? '已划线' : '已取消这一段划线');
+});
 
 /* 生词 / 错题 / 清空 */
 document.addEventListener('click', e => {

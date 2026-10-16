@@ -383,8 +383,44 @@ textarea.big:focus { outline: none; border-color: var(--brand); }
   text-decoration-color: var(--brand);
   text-decoration-thickness: 2px;
 }
+/* ★ 真正兜底的那一条：按字符区间包出来的 .ulr（见 app.js 的 wrapRangeUnderline）。
+
+   上面那条 ::highlight(ul) 只有比较新的浏览器认；下面 .w.ul 那条只认得
+   "本地词库收录的词"。两条都有死角，普通词和中文在手机上就是划不出来。
+   所以把下划线的样子也在这里给 .ulr 一份 —— 三种机制画出来的是同一个样子，
+   在哪个浏览器上打开都一致。 */
+.ulr {
+  background-color: var(--brand-soft);
+  text-decoration: underline;
+  text-decoration-color: var(--brand);
+  text-decoration-thickness: 2px;
+}
+
 /* 老浏览器不支持 Highlight API 时的退路：逐词加 .ul（见 app.js） */
 .w.ul { text-decoration: underline; text-decoration-color: var(--brand); text-decoration-thickness: 2px; }
+
+/* 被 .ulr 包住的词元不要再叠一条 box-shadow 下划线 ——
+   .ulr 已经画了一条，两个一起上就是同一个词底下挨着两条线。 */
+.ulr .w.ul { box-shadow: none; }
+
+/* 手机上选完一段之后浮出来的那个「划线」按钮。
+
+   位置由 JS 算（贴着选区），这里只管长相。
+   尺寸要够大：这是手指点的，不是鼠标；44px 是能稳稳点中的下限。
+   层级要压过正文和底栏，否则贴着屏幕下沿时会被盖住。 */
+#ul-apply {
+  position: fixed;
+  z-index: 70;
+  width: 104px; height: 40px;
+  border: 0; border-radius: 20px;
+  background: var(--brand); color: #fff;
+  font-size: 14px; font-weight: 600; font-family: inherit;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .28);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+/* 这一段已经划过了 → 按钮改成"取消"，给它一个不那么"主操作"的样子 */
+#ul-apply[data-add="0"] { background: var(--fg2); }
 
 /* 卷子进度条 */
 .pbar { height: 8px; border-radius: 5px; background: var(--line); overflow: hidden; }
