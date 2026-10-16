@@ -71,7 +71,10 @@ jobs:
           echo "ANDROID_HOME=${ANDROID_HOME:-（空）}"
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-（空）}"
           echo "挑中的 SDK = $SDK"
-          if [ ! -d "$SDK" ]; then echo "找不到安卓 SDK"; exit 1; fi
+          if [ ! -d "$SDK" ]; then
+            echo "::error::找不到安卓 SDK（ANDROID_HOME 和几个常见目录都是空的）"
+            exit 1
+          fi
           echo "── platforms ──";   ls "$SDK/platforms"   || true
           echo "── build-tools ──"; ls "$SDK/build-tools" || true
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
@@ -98,6 +101,11 @@ jobs:
           mkdir -p android-app/app/src/main/assets
           cp -r index.html app.js style.css data ocr android-app/app/src/main/assets/
           du -sh android-app/app/src/main/assets
+          echo "── assets 根目录 ──"; ls -1 android-app/app/src/main/assets
+          for f in index.html app.js style.css data/dict.json ocr/tesseract.min.js; do
+            if [ -e "android-app/app/src/main/assets/$f" ]; then echo "  ✓ $f"
+            else echo "::error::搬运之后 assets 里没有 $f（搬之前它就不在仓库根目录？）"; exit 1; fi
+          done
 
       - name: 打包
         working-directory: android-app
@@ -158,24 +166,51 @@ jobs:
           PYEOF
           exit 0
 
+      # ⚠️ 这一步里**不能**用裸的 `exit 1`。
+      #    构建日志要登录才能看，而注解不用登录 ——
+      #    所以每一处失败都必须先 echo 一条 ::error:: 说清是什么，
+      #    否则排查的人只会看到一个光秃秃的 "Process completed with exit code 1"。
       - name: 取出来并体检
         run: |
+          fail() { echo "::error::$1"; exit 1; }
+
+          APK=$(find android-app/app/build/outputs/apk -name '*.apk' -type f 2>/dev/null | sort | tail -1)
+          if [ -z "$APK" ]; then
+            fail "构建完了却没找到 .apk。outputs 目录长这样：$(ls -R android-app/app/build/outputs 2>&1 | head -30 | tr '\n' ' ')"
+          fi
+          echo "APK = $APK"
+
           mkdir -p out
-          cp android-app/app/build/outputs/apk/release/app-release.apk out/EnglishTrainer.apk
+          cp "$APK" out/EnglishTrainer.apk || fail "复制 APK 到 out/ 失败"
           ls -lh out/
-          BT=$(ls -d "$ANDROID_HOME"/build-tools/* 2>/dev/null | sort -V | tail -1)
+
           echo "── 包名 / 版本 ──"
-          "$BT/aapt2" dump badging out/EnglishTrainer.apk 2>/dev/null | head -4 || true
+          BT=$(ls -d "${ANDROID_HOME:-/usr/local/lib/android/sdk}"/build-tools/* 2>/dev/null | sort -V | tail -1)
+          if [ -n "$BT" ] && [ -x "$BT/aapt2" ]; then
+            "$BT/aapt2" dump badging out/EnglishTrainer.apk 2>&1 | head -4 || true
+          else
+            echo "（没找到 aapt2，跳过这一步。build-tools 目录 = ${BT:-无}）"
+          fi
+
           echo "── 站点文件在不在里面 ──"
-          unzip -l out/EnglishTrainer.apk > /tmp/ziplist.txt
+          unzip -l out/EnglishTrainer.apk > /tmp/ziplist.txt || fail "unzip 读不了这个 APK"
+          echo "包内带 assets/ 的条目共 $(grep -c 'assets/' /tmp/ziplist.txt) 条，前 30 条："
+          grep 'assets/' /tmp/ziplist.txt | awk '{print "  " $NF}' | head -30
+
           # ⚠️ 故意**不查** data/builtin.json：系统自带的真题只留本机，
           #    公开仓库里没有它（发布脚本会把公开目录里的副本清掉）。
           #    写成查它的话，每次构建都会误报缺文件、把构建搞挂。
+          missing=""
           for f in assets/index.html assets/app.js assets/style.css \
                    assets/data/dict.json assets/data/samples.json assets/data/bank.json \
                    assets/ocr/tesseract.min.js assets/ocr/eng.traineddata.gz; do
-            if grep -q -- "$f" /tmp/ziplist.txt; then echo "  ✓ $f"; else echo "  ✗ 缺 $f"; exit 1; fi
+            if grep -q -- "$f" /tmp/ziplist.txt; then echo "  ✓ $f"
+            else echo "  ✗ 缺 $f"; missing="$missing $f"; fi
           done
+          if [ -n "$missing" ]; then
+            fail "APK 里少了这些站点文件：$missing"
+          fi
+
           echo "── 指纹 ──"
           sha256sum out/EnglishTrainer.apk
 
