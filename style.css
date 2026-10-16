@@ -188,8 +188,9 @@ table.pt .pr { display: block; color: var(--fg3); font-size: 11.5px; margin-top:
 .w { cursor: pointer; border-radius: 3px; }
 .w.hit { background: var(--ok-soft); box-shadow: inset 0 -2px 0 var(--ok); }
 .w.miss { background: var(--warn-soft); box-shadow: inset 0 -2px 0 var(--warn); }
-/* 自己划的线（持久保留） */
-.w.ul { box-shadow: inset 0 -2px 0 var(--brand); }
+/* 自己划的线（持久保留）。
+   ⚠️ 样子统一由 .ulr 给（见下面那一段），这里不再单给 .w 一份 ——
+      .ul 这个类名 2026-10-16 起已经不由 JS 产生了（原因见 app.js applyMarks）。 */
 /* 已经在生词本里的词 */
 .w.saved { border-bottom: 1px dashed var(--fg3); }
 /* 排除掉的选项（点前面的字母切换） */
@@ -383,25 +384,22 @@ textarea.big:focus { outline: none; border-color: var(--brand); }
   text-decoration-color: var(--brand);
   text-decoration-thickness: 2px;
 }
-/* ★ 真正兜底的那一条：按字符区间包出来的 .ulr（见 app.js 的 wrapRangeUnderline）。
+/* ★ 真正管用的那一条：按字符区间包出来的 .ulr（见 app.js 的 wrapRangeUnderline）。
 
-   上面那条 ::highlight(ul) 只有比较新的浏览器认；下面 .w.ul 那条只认得
-   "本地词库收录的词"。两条都有死角，普通词和中文在手机上就是划不出来。
-   所以把下划线的样子也在这里给 .ulr 一份 —— 三种机制画出来的是同一个样子，
-   在哪个浏览器上打开都一致。 */
+   上面那条 ::highlight(ul) 只有比较新的浏览器认；.w.ul 那条只认得
+   "本地词库收录的整词"。两条都有死角 —— 普通词、中文、半截词都画不出来。
+   所以把下划线的样子必须在这里给 .ulr 一份。
+
+   ⚠️ .ulr 是**按文本节点**包的：划中一个词就包那个词，
+      只划中 "is" 里的 i，就只把 i 包起来（s 留在外面）。
+      所以 .ulr 一定落在行内，绝不会把排版撑开。
+   ⚠️ 不要给它加 display / white-space 之类的属性 —— 它必须是纯行内元素。 */
 .ulr {
   background-color: var(--brand-soft);
   text-decoration: underline;
   text-decoration-color: var(--brand);
   text-decoration-thickness: 2px;
 }
-
-/* 老浏览器不支持 Highlight API 时的退路：逐词加 .ul（见 app.js） */
-.w.ul { text-decoration: underline; text-decoration-color: var(--brand); text-decoration-thickness: 2px; }
-
-/* 被 .ulr 包住的词元不要再叠一条 box-shadow 下划线 ——
-   .ulr 已经画了一条，两个一起上就是同一个词底下挨着两条线。 */
-.ulr .w.ul { box-shadow: none; }
 
 /* 手机上选完一段之后浮出来的那个「划线」按钮。
 

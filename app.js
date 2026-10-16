@@ -1073,7 +1073,7 @@ function rangeFromOffsets(root, s, e) {
   return r;
 }
 
-/* 给一段区间套一个 <span class="ulr">，让"划线"真的看得见。
+/* 把一段区间真实地"划"出来 —— 只切文本节点，给覆盖到的每一截套 <span class="ulr">。
 
    ⚠️⚠️ 为什么非要有这一层（这是"手机上划线消失"的真因）
 
@@ -1087,28 +1087,77 @@ function rangeFromOffsets(root, s, e) {
    只有 "fox" 这 3 个显示出来；划一段中文，屏幕上什么都没有。
    ——看起来就是"划线功能坏了"。
 
-   所以这里补第三条路：**按字符区间直接把文字包起来**，不依赖任何高级 API。
+   所以这里补第三条路：**按字符区间把文字包起来**，不依赖任何高级 API。
    它和 ①② 不冲突，只把漏掉的部分补齐。
 
-   实现上两个坑：
-   · `surroundContents` 在"区间只覆盖某个元素的一部分"时会抛 InvalidStateError
-     —— 划到词元中间就是这种情况，非常常见，所以必须有退路。
-   · 包 span **不改变文字**，因此字符偏移全程保持有效；
-     但为了不去动还没处理的区间，仍然从后往前包。 */
+   ⚠️⚠️ 为什么**不能**用 surroundContents / extractContents
+   （2026-10-16 修的两处线上毛病，根因是同一个）
+
+   最直觉的写法是 `range.surroundContents(span)`，包不住就退到
+   `span.appendChild(range.extractContents())`。这个写法有两处硬伤：
+
+   · `surroundContents()` 只要区间**部分覆盖了任意一个非文本节点**就抛错。
+     而划到词元（<span class="w">）中间每次都会命中 —— 所以退路才是常态。
+   · `extractContents()` 会把**被部分覆盖的元素克隆一份**放进返回值，
+     并且把原节点掏空。于是：
+       - 一个区间跨过两个 <p>（短文是多段的时候随手一拖就会跨）→ <p> 成了
+         "被部分覆盖的元素" → 克隆出来的 <p> 被塞进行内的 span 里。
+         行内元素放块级元素，浏览器只能按两块排版：**整篇的排版当场断成几段**
+         （用户看到的"划线之后出现换行"就是它，实测段落数 2 → 4）。
+       - 区间开头那个词元被掏空，留下一个宽度为 0、却还点得到的空壳。
+
+   所以改法换成：**完全不动元素，只切文本节点**。
+   区间覆盖到的每个文本节点，按左右边界各切一刀，把中间那截塞进 .ulr：
+
+       <span class="w" data-w="is">is</span>   只划中 "i"
+         → <span class="w" data-w="is"><span class="ulr">i</span>s</span>
+
+   这样一来：
+     · 字符级精确 —— 划一个字就只亮一个字，不会"整词跟着亮"；
+     · 不碰块级元素 —— 不可能再断行；
+     · 词元结构原封不动 —— 下划线底下那个词照样点得开释义；
+     · 没有空壳残留。
+   切文本不改变文字内容，所以字符偏移全程依然有效。 */
 function wrapRangeUnderline(rg) {
-  if (!rg || rg.collapsed) return false;
-  const span = document.createElement('span');
-  span.className = 'ulr';
-  try {
-    rg.surroundContents(span);
-    return true;
-  } catch (e) { /* 跨元素边界（比如划进了一个词元中间），走下面的退路 */ }
-  try {
-    const frag = rg.extractContents();
-    span.appendChild(frag);
-    rg.insertNode(span);
-    return true;
-  } catch (e) { return false; }
+  if (!rg || rg.collapsed) return 0;
+  /* 先把"要切哪些文本节点、切哪一截"全部算完，再动手改 DOM ——
+     一边切一边遍历会读到已经被切开的新节点，越切越乱。
+
+     ⚠️ 遍历起点要特别小心：区间的 commonAncestorContainer 在"一头一尾落在
+        同一个文本节点里"时**就是那个文本节点本身**（划一个字母、划一段中文
+        都是这种），而 TreeWalker 不会返回它的根节点 —— 照直用就会一个节点
+        都收不到，表现成"划了但什么都没划上"。所以文本节点要退到它的父节点。 */
+  let scan = rg.commonAncestorContainer;
+  if (scan && scan.nodeType === 3) scan = scan.parentNode;
+  if (!scan) return 0;
+  const hits = [];
+  const walker = document.createTreeWalker(scan, NodeFilter.SHOW_TEXT, null);
+  let n;
+  while ((n = walker.nextNode())) {
+    if (!rg.intersectsNode(n)) continue;
+    const len = n.nodeValue.length;
+    let a = 0, b = len;
+    if (n === rg.startContainer) a = rg.startOffset;   // 区间左边界落在这里
+    if (n === rg.endContainer) b = rg.endOffset;       // 区间右边界落在这里
+    a = Math.max(0, Math.min(a, len));
+    b = Math.max(0, Math.min(b, len));
+    if (b <= a) continue;                              // 这个节点其实没被划到
+    hits.push({ node: n, a: a, b: b });
+  }
+  let done = 0;
+  hits.forEach(h => {
+    try {
+      let seg = h.node;
+      if (h.a > 0) seg = seg.splitText(h.a);                    // 左边界切一刀
+      if (seg.nodeValue.length > h.b - h.a) seg.splitText(h.b - h.a);  // 右边界切一刀
+      const span = document.createElement('span');
+      span.className = 'ulr';
+      seg.parentNode.insertBefore(span, seg);
+      span.appendChild(seg);
+      done++;
+    } catch (e) { /* 这一截包不上就算了，不影响其它截 */ }
+  });
+  return done;
 }
 
 /* 选一段 → 划上；选到**已经有划线的地方** → 取消那一部分。
@@ -1160,29 +1209,34 @@ function applyMarks() {
   if (!ctx) return;
   const rs = ((marks[ctx.key] || {}).r) || [];
   const conts = ulContainers();
-  // 逐词加 .ul：① 不支持 Highlight API 的浏览器靠它显示划线；
-  //              ② 自测里能直接数 .w.ul。
-  // ⚠️ 这一步不能因为用了 Highlight API 就跳过 —— 下面还有"排除选项"要画，
-  //    之前在这里 return，把 strike 一起跳过了（排除选项整个失效）。
-  conts.forEach((root, k) => {
-    const mine = rs.filter(r => (r.c || 0) === k);
-    if (!mine.length) return;
-    let pos = 0;
-    const walk = node => {
-      if (node.nodeType === 3) { pos += node.nodeValue.length; return; }
-      if (node.nodeType !== 1) return;
-      if (node.classList.contains('w')) {
-        const len = node.textContent.length;
-        if (mine.some(r => r.s < pos + len && r.e > pos)) node.classList.add('ul');
-        pos += len;
-        return;
-      }
-      Array.prototype.forEach.call(node.childNodes, walk);
-    };
-    Array.prototype.forEach.call(root.childNodes, walk);
+
+  /* ⚠️ 这里原来还有一步"逐词给 .w 加 .ul"（判断依据是"区间和这个词有重叠"）。
+     2026-10-16 删掉，两个原因：
+
+     ① 它是"划线会默认补全单词"的直接来源。
+        "重叠"是个很松的条件 —— 只划中 "is" 里的一个 i，整个 is 也算重叠，
+        于是整个词被加上下划线。用户要的是"划到哪就是哪"。
+     ② 它本来就是多余的。下面第 ③ 步（.ulr）是**按字符**包的，
+        普通词、中文、半截词全能包住，不依赖任何新 API；
+        而第 ② 步（Highlight API）在现代浏览器上画得更准。
+        留着它只会和 ③ 叠出两条线。
+
+     顺带说明：删掉这一步之后，"画出来"就只剩 ②③ 两条路，
+     .ul 这个类名不再由 JS 产生了。 */
+  /* 第一条真正管用的路：按字符区间把文字包进 .ulr。
+     ★ 另外两条路各有死角（见 wrapRangeUnderline 上面那段说明）：
+       Highlight API 只有新浏览器有；逐词 .ul 只认词库收录的整词。
+       只有这一条不依赖任何新 API，普通词 / 中文 / 半截词全都包得住。 */
+  rs.forEach(r => {
+    const root = conts[r.c || 0];
+    if (!root) return;
+    wrapRangeUnderline(rangeFromOffsets(root, r.s, r.e));
   });
-  // 额外再画一层：CSS Custom Highlight 能把整条区间连成一条下划线（中文也能划）。
-  // 它和上面的 .ul 不冲突，只是让下划线更连续。
+
+  /* 再补一层：CSS Custom Highlight 能把整条区间连成一条更平滑的下划线。
+     ⚠️ 放在包装**之后**建 Range —— 包装会切开文本节点，虽然浏览器会自动
+        维护活动 Range 的边界，但直接按最终 DOM 建一次更省心（文字没变，
+        字符偏移依然对得上）。 */
   if (window.Highlight && window.CSS && CSS.highlights) {
     try { CSS.highlights.delete('ul'); } catch (e) { /* 没有就算了 */ }
     if (rs.length) {
@@ -1196,18 +1250,6 @@ function applyMarks() {
       CSS.highlights.set('ul', hl);
     }
   }
-
-  /* 第三条路：按字符区间把文字包进 .ulr。
-     ★ 前面两条路各有死角（见 wrapRangeUnderline 上面那段说明），
-       这一条才是"到哪都看得见"的那条 —— 普通词、中文、跨词片段全靠它。
-     放在最后做：①② 都基于"还没被包装过"的干净 DOM，
-     而包装不改文字，所以这里的偏移依然对得上。
-     倒序处理只是为了万一将来包装改成会动文字时也不出岔子。 */
-  rs.slice().sort((a, b) => (b.c || 0) - (a.c || 0) || b.s - a.s).forEach(r => {
-    const root = conts[r.c || 0];
-    if (!root) return;
-    wrapRangeUnderline(rangeFromOffsets(root, r.s, r.e));
-  });
 
   if (!ctx) return;
   const m = marks[ctx.key];
