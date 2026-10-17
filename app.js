@@ -4864,7 +4864,7 @@ function legacyCopy(txt) {
 }
 
 /* 「装到手机上」入口，挂在「我的」页底部。
-   ★ 动手改这块之前先读四条，每条都是真事：
+   ★ 动手改这块之前先读几条，每条都是真事：
    1. 只能是链接。不许 location.href 跳、不许脚本去触发下载。
       页面一打开就往人手机里塞文件，谁看了都会当成流氓站 —— 这是最要紧的一条。
    2. 不弹窗、不浮层、不自动展开。想装的人自己找得到就够了，
@@ -4872,27 +4872,18 @@ function legacyCopy(txt) {
    3. 已经在 App 里就不显示（IN_SHELL）—— 人都在 App 里了，再劝他装 App 很傻。
       IN_SHELL 在本文件只有一处定义（靠 AndroidShell.saveText 认），直接用它，
       别在这儿另写一遍判断。
-   4. 文案里那句「先导出备份」不能删。网页版和 App 里的 localStorage 是**两套**
-      （源不同、分区也不同），记录不会自己跟过去。不写这句，人装完打开一看
-      进度是空的，会以为数据丢了或者软件坏了。 */
+   4. 🔴 **不要往这儿加说明小字**。体积多大、iPhone 怎么办、"未知来源"怎么点、
+      "先导出备份"——用户明确说过这些不要，写上去只是没人读的一坨。
+      平台信息靠按钮上的「安卓」两个字就够了。
+      （事实仍然成立：网页版和 App 里的 localStorage 是两套，记录不会自己跟过去。
+       但这件事**不写在页面上** —— 要提醒就在别处提醒，别在这儿堆。） */
 function vGetApp() {
   if (IN_SHELL) return '';
   return `
   <div class="sec">装到手机上</div>
   <div class="card tight">
-    <div class="meta" style="margin-top:0">
-      这是个网页，<b>不装也能用</b> —— 浏览器打开就在。装成 App 之后图标躺在桌面上，
-      点开就是全屏，不用每次去翻收藏夹。
-    </div>
-    <div class="row" style="margin:10px 0 0">
+    <div class="row" style="margin:0">
       <a class="btn ghost sm" href="https://github.com/zhouxuan078-max/english-exam-trainer/releases/latest/download/EnglishTrainer.apk">下载安卓安装包</a>
-    </div>
-    <div class="meta" style="margin-top:6px">
-      约 5 MB（里面带着离线识图用的语言模型，所以比一般网页大）。
-      只对<b>安卓手机</b>有用，iPhone 装不了。没上应用商店，安装时手机可能提示
-      「未知来源」，允许这一次就行。<br>
-      <b>装之前先在上面导出一份备份</b>，进 App 以后再「还原备份」——
-      网页和 App 各存各的，答题记录不会自己跟过去。
     </div>
   </div>
   `;
