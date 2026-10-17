@@ -4888,11 +4888,12 @@ function vGetAppTile() {
    3. 已经在 App 里就不显示（IN_SHELL）—— 人都在 App 里了，再劝他装 App 很傻。
       IN_SHELL 在本文件只有一处定义（靠 AndroidShell.saveText 认），直接用它，
       别在这儿另写一遍判断。
-   4. 🔴 **不要往这儿加说明小字**。体积多大、iPhone 怎么办、"未知来源"怎么点、
-      "先导出备份"——用户明确说过这些不要，写上去只是没人读的一坨。
+   4. 🔴 **别往这儿加说明小字**。体积多大、iPhone 怎么办、"未知来源"怎么点
+      —— 用户明确说过这些不要，写上去只是没人读的一坨。
       平台信息靠按钮上的「安卓」两个字就够了。
-      （事实仍然成立：网页版和 App 里的 localStorage 是两套，记录不会自己跟过去。
-       但这件事**不写在页面上** —— 要提醒就在别处提醒，别在这儿堆。） */
+   5. **只有一句附注是例外**：网页和 App 的数据不互通、要用备份来统一。
+      这句是他自己要的，别删；也**别顺着它扩写**（不要解释为什么、不要讲原理、
+      不要再加第二句）。就一句话，说完就停。 */
 function vGetApp() {
   if (IN_SHELL) return '';
   return `
@@ -4900,6 +4901,9 @@ function vGetApp() {
   <div class="card tight">
     <div class="row" style="margin:0">
       <a class="btn ghost sm" href="${APK_URL}">${APK_LABEL}</a>
+    </div>
+    <div class="meta" style="margin:9px 0 0">
+      网页和 App 各存各的。想让两边内容一样，导出备份，在另一边还原就行。
     </div>
   </div>
   `;
