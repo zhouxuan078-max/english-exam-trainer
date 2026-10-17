@@ -3,7 +3,10 @@
 一个纯静态的英语备考练习站：**12 场考试、12 种题型**，浏览器打开就能用，
 不需要注册、没有服务器、没有数据库。
 
-**在线使用**：<https://zhouxuan078-max.github.io/english-exam-trainer/>
+**在线使用**：<https://english-exam-trainer-9tn.pages.dev/>
+
+备用入口（同一份内容，主地址打不开时用）：
+<https://zhouxuan078-max.github.io/english-exam-trainer/>
 
 ## 12 场考试
 
