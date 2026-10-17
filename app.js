@@ -1437,6 +1437,7 @@ function vHome() {
     }).join('')}
     <a href="#vocab" data-go="vocab"><div class="n">🔖 生词本</div><div class="d">${vocab.length} 个词${srsDueCount() ? ' · 待复习 ' + srsDueCount() : ''}</div></a>
     <a href="#me" data-go="me"><div class="n">📊 我的</div><div class="d">错题 ${wrong.length} 条</div></a>
+    ${vGetAppTile()}
   </div>
 
   ${(() => {
@@ -4863,7 +4864,22 @@ function legacyCopy(txt) {
   } catch (e) { return false; }
 }
 
-/* 「装到手机上」入口，挂在「我的」页底部。
+/* 安装包地址只写这一处。页面上有三个入口（首页格子 / 选考试页 / 「我的」），
+   全用下面这个常量 —— 换仓库、换文件名只改这里一行。
+   ⚠️ 不用 target="_blank"、不用 download 属性：跨域时 download 会被忽略，
+      target 只会留下一个空白页，下载响应本身不会把页面顶掉。 */
+const APK_URL = 'https://github.com/zhouxuan078-max/english-exam-trainer/releases/latest/download/EnglishTrainer.apk';
+const APK_LABEL = '下载安卓安装包';
+
+/* 首页「这个考试要练什么」那个网格里的一格。
+   放格子不放页脚：首页内容很长，卡片挂在最底下要滚到底才看得见，等于没有。
+   这一格就在统计条下面，第一屏就露着。 */
+function vGetAppTile() {
+  if (IN_SHELL) return '';
+  return `<a href="${APK_URL}"><div class="n">📱 装到手机上</div><div class="d">安卓安装包</div></a>`;
+}
+
+/* 小节 + 卡片那种样式，给「我的」页和选考试页用。
    ★ 动手改这块之前先读几条，每条都是真事：
    1. 只能是链接。不许 location.href 跳、不许脚本去触发下载。
       页面一打开就往人手机里塞文件，谁看了都会当成流氓站 —— 这是最要紧的一条。
@@ -4883,7 +4899,7 @@ function vGetApp() {
   <div class="sec">装到手机上</div>
   <div class="card tight">
     <div class="row" style="margin:0">
-      <a class="btn ghost sm" href="https://github.com/zhouxuan078-max/english-exam-trainer/releases/latest/download/EnglishTrainer.apk">下载安卓安装包</a>
+      <a class="btn ghost sm" href="${APK_URL}">${APK_LABEL}</a>
     </div>
   </div>
   `;
@@ -5058,6 +5074,7 @@ function vOnboard() {
           style="font-size:13px;padding:9px 13px">${esc(e.short || e.name)}</button>`).join('')}
       </div>
     </div>`).join('')}
+  ${vGetApp()}
 `;
 }
 
