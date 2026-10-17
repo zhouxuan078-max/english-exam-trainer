@@ -106,7 +106,11 @@ button.btn:active { opacity: .85; }
 button.ghost, a.ghost {
   background: var(--card); color: var(--brand); border: 1px solid var(--line);
 }
-button.sm { padding: 8px 14px; font-size: 13px; border-radius: 8px; }
+/* a.sm 和 button.sm 必须成对出现：
+   「下载安装包」那个入口是个 <a>（要能直接触发下载，不能用 button），
+   只写 button.sm 的话它会按默认的 11px 20px / 15px 渲染，
+   跟旁边的按钮完全不是一个尺寸。 */
+button.sm, a.sm { padding: 8px 14px; font-size: 13px; border-radius: 8px; }
 button:disabled { opacity: .45; cursor: not-allowed; }
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
 
